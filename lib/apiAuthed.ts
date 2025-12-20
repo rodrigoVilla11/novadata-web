@@ -5,10 +5,10 @@ type GetToken = () => Promise<string | null>;
 export async function apiFetchAuthed<T>(
   getToken: GetToken,
   path: string,
-  options: RequestInit = {},
+  options: RequestInit = {}
 ): Promise<T> {
   const token = await getToken();
-
+  console.log("apiFetchAuthed -> token?", !!token);
   // Si no hay token, igual intentamos (puede ser endpoint público),
   // pero para admin/users te conviene fallar.
   const doFetch = (t?: string | null) =>
@@ -26,7 +26,8 @@ export async function apiFetchAuthed<T>(
     // Si expiró el access token, apiFetch devuelve Error(msg).
     // Como no tenemos status, detectamos por mensaje típico.
     const msg = String(e?.message || "");
-    const looks401 = msg.includes("401") || msg.toLowerCase().includes("unauthorized");
+    const looks401 =
+      msg.includes("401") || msg.toLowerCase().includes("unauthorized");
 
     if (!looks401) throw e;
 

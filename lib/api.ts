@@ -10,7 +10,7 @@ export async function apiFetch<T>(
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
-    credentials: "include", // 🔥 cookies httpOnly
+    credentials: "include",
   });
 
   if (!res.ok) {
@@ -22,5 +22,11 @@ export async function apiFetch<T>(
     throw new Error(msg);
   }
 
-  return res.json();
+  // ✅ Soporta 204 / body vacío
+  if (res.status === 204) return undefined as T;
+
+  const text = await res.text();
+  if (!text.trim()) return undefined as T;
+
+  return JSON.parse(text) as T;
 }
