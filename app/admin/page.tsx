@@ -166,6 +166,12 @@ export default function AdminHomePage() {
         href: "/manager/weekly",
         icon: <BadgeCheck className="h-5 w-5" />,
       },
+      {
+        title: "Finanzas",
+        desc: "Ver y crear movimientos, categorías y cuentas.",
+        href: "/admin/finance",
+        icon: <BadgeCheck className="h-5 w-5" />,
+      },
     ],
     []
   );

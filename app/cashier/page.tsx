@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
@@ -18,7 +18,6 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
-  Wallet,
   ArrowDownUp,
   LogOut,
 } from "lucide-react";
@@ -89,7 +88,6 @@ function cn(...classes: Array<string | false | null | undefined>) {
 // ============================================================================
 type MeResponse = {
   employee: { id: string; fullName: string; hourlyRate: number; isActive: boolean };
-  // si ya lo agregaste: roles?: string[];
 };
 
 type SummaryResponse = {
@@ -115,9 +113,9 @@ type ProductionRow = {
 };
 
 // ============================================================================
-// Types (Finance stats)
+// Types (Finance stats + movements)
 // ============================================================================
-type PeriodType = "day" | "week" | "month" | "custom";
+type PeriodType = "day"; // ✅ día nomás
 
 type FinanceStatsResponse = {
   range: { from: string; to: string };
@@ -158,6 +156,39 @@ type FinanceAccountRow = {
   name: string;
 };
 
+type FinanceCategoryRow = {
+  id: string;
+  name: string;
+  type: "INCOME" | "EXPENSE" | "BOTH";
+};
+
+type FinanceMovementType = "INCOME" | "EXPENSE" | "TRANSFER";
+
+type FinanceMovementRow = {
+  id: string;
+  dateKey: string;
+  type: FinanceMovementType;
+  amount: number;
+  accountId: string | null;
+  toAccountId: string | null;
+  categoryId: string | null;
+  providerId: string | null;
+  notes: string | null;
+  status: "POSTED" | "VOID";
+  accountNameSnapshot: string | null;
+  categoryNameSnapshot: string | null;
+  createdByUserId: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type FinanceMovementsResponse = {
+  items: FinanceMovementRow[];
+  page: number;
+  limit: number;
+  total: number;
+};
+
 // ============================================================================
 // Page
 // ============================================================================
@@ -167,7 +198,7 @@ export default function CashierPanelPage() {
   const [activeTab, setActiveTab] = useState<"work" | "finance">("work");
 
   // -------------------------
-  // WORK (same as UserPage)
+  // WORK
   // -------------------------
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
   const week = useMemo(() => getWeekRange(dateKey), [dateKey]);
@@ -176,7 +207,7 @@ export default function CashierPanelPage() {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [prod, setProd] = useState<ProductionRow[]>([]);
 
-  const [busy, setBusy] = useState(false); // <- para acciones (incluye logout)
+  const [busy, setBusy] = useState(false);
   const [busyRefresh, setBusyRefresh] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -184,31 +215,49 @@ export default function CashierPanelPage() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
   const [qTasks, setQTasks] = useState("");
-  const [openDays, setOpenDays] = useState<Record<string, boolean>>({}); // accordion days
+  const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
 
   // -------------------------
-  // FINANCE
+  // FINANCE (DÍA)
   // -------------------------
-  const [periodType, setPeriodType] = useState<PeriodType>("day");
+  const [periodType] = useState<PeriodType>("day");
   const [financeDateKey, setFinanceDateKey] = useState(todayKeyArgentina());
-  const [from, setFrom] = useState(todayKeyArgentina());
-  const [to, setTo] = useState(todayKeyArgentina());
 
   const [stats, setStats] = useState<FinanceStatsResponse | null>(null);
   const [accounts, setAccounts] = useState<FinanceAccountRow[]>([]);
+  const [categories, setCategories] = useState<FinanceCategoryRow[]>([]);
   const [qAccounts, setQAccounts] = useState("");
 
-  function buildStatsUrl() {
+  const [movs, setMovs] = useState<FinanceMovementsResponse | null>(null);
+  const [movLoading, setMovLoading] = useState(false);
+
+  const [movType, setMovType] = useState<"" | FinanceMovementType>("");
+  const [movAccountId, setMovAccountId] = useState("");
+  const [movCategoryId, setMovCategoryId] = useState("");
+  const [movQ, setMovQ] = useState("");
+  const [movPage, setMovPage] = useState(1);
+  const movLimit = 30;
+
+  function buildDayStatsUrl() {
     const sp = new URLSearchParams();
     sp.set("periodType", periodType);
-
-    if (periodType === "custom") {
-      sp.set("from", from);
-      sp.set("to", to);
-    } else {
-      sp.set("dateKey", financeDateKey);
-    }
+    sp.set("dateKey", financeDateKey);
     return `/finance/stats?${sp.toString()}`;
+  }
+
+  function buildDayMovementsUrl() {
+    const sp = new URLSearchParams();
+    sp.set("from", financeDateKey);
+    sp.set("to", financeDateKey);
+    sp.set("limit", String(movLimit));
+    sp.set("page", String(movPage));
+
+    if (movType) sp.set("type", movType);
+    if (movAccountId) sp.set("accountId", movAccountId);
+    if (movCategoryId) sp.set("categoryId", movCategoryId);
+    if (movQ.trim()) sp.set("q", movQ.trim());
+
+    return `/finance/movements?${sp.toString()}`;
   }
 
   async function loadWork() {
@@ -237,16 +286,28 @@ export default function CashierPanelPage() {
   }
 
   async function loadFinance() {
+    setError(null);
     try {
-      const s = await apiFetchAuthed<FinanceStatsResponse>(getAccessToken, buildStatsUrl());
+      // Stats del día
+      const s = await apiFetchAuthed<FinanceStatsResponse>(getAccessToken, buildDayStatsUrl());
       setStats(s);
 
-      // Ajustá el endpoint si tu controller es otro
-      const acc = await apiFetchAuthed<FinanceAccountRow[]>(getAccessToken, "/finance/accounts");
+      // Cat + cuentas
+      const [acc, cats] = await Promise.all([
+        apiFetchAuthed<FinanceAccountRow[]>(getAccessToken, "/finance/accounts?active=true"),
+        apiFetchAuthed<FinanceCategoryRow[]>(getAccessToken, "/finance/categories?active=true"),
+      ]);
       setAccounts(acc);
+      setCategories(cats);
+
+      // Movements del día
+      setMovLoading(true);
+      const m = await apiFetchAuthed<FinanceMovementsResponse>(getAccessToken, buildDayMovementsUrl());
+      setMovs(m);
     } catch (e: any) {
-      // no pisar el error del work si ya está; mostramos el último
-      setError(e?.message || "Error cargando stats (finanzas)");
+      setError(e?.message || "Error cargando finanzas (día)");
+    } finally {
+      setMovLoading(false);
     }
   }
 
@@ -295,11 +356,11 @@ export default function CashierPanelPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [week.from, week.to]);
 
-  // refresh finanzas cuando cambian filtros
+  // refresh finanzas cuando cambian filtros/página/día
   useEffect(() => {
     loadFinance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodType, financeDateKey, from, to]);
+  }, [financeDateKey, movType, movAccountId, movCategoryId, movQ, movPage]);
 
   const todayRow = useMemo(() => {
     return summary?.items?.find((x) => x.dateKey === dateKey) ?? null;
@@ -354,6 +415,23 @@ export default function CashierPanelPage() {
     }
   }
 
+  async function voidMovement(id: string) {
+    if (!confirm("¿Anular movimiento?")) return;
+    setBusy(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      await apiFetchAuthed(getAccessToken, `/finance/movements/${id}/void`, { method: "POST" });
+      await loadFinance();
+      setOkMsg("Movimiento anulado ✔");
+      window.setTimeout(() => setOkMsg(null), 2500);
+    } catch (e: any) {
+      setError(e?.message || "Error anulando movimiento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Agrupar tareas por día
   const prodByDay = useMemo(() => {
     const map = new Map<string, ProductionRow[]>();
@@ -403,6 +481,12 @@ export default function CashierPanelPage() {
     for (const a of accounts) m.set(a.id, a.name);
     return m;
   }, [accounts]);
+
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categories) m.set(c.id, c.name);
+    return m;
+  }, [categories]);
 
   const byAccountRows = useMemo(() => {
     const rows = stats?.byAccount ?? [];
@@ -471,18 +555,11 @@ export default function CashierPanelPage() {
                 </span>
               </div>
 
-              <p className="mt-1 text-sm text-zinc-500">
-                Mis horas y tareas + stats de finanzas.
-              </p>
+              <p className="mt-1 text-sm text-zinc-500">Mis horas y tareas + finanzas del día.</p>
             </div>
 
             <div className="flex items-end gap-2">
-              <Button
-                variant="secondary"
-                onClick={refreshAll}
-                disabled={busy || busyRefresh}
-                loading={busyRefresh}
-              >
+              <Button variant="secondary" onClick={refreshAll} disabled={busy || busyRefresh} loading={busyRefresh}>
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
                   Refrescar
@@ -517,9 +594,7 @@ export default function CashierPanelPage() {
               onClick={() => setActiveTab("work")}
               className={cn(
                 "h-10 rounded-xl border px-3 text-sm font-semibold transition",
-                activeTab === "work"
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+                activeTab === "work" ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
               )}
             >
               Mi trabajo
@@ -542,9 +617,7 @@ export default function CashierPanelPage() {
           {(error || okMsg) && (
             <div className="mt-3 grid gap-2">
               {error && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </div>
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
               )}
               {okMsg && (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -558,37 +631,28 @@ export default function CashierPanelPage() {
 
       <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
         {/* ================================================================== */}
-        {/* WORK TAB (same as UserPage) */}
+        {/* WORK TAB */}
         {/* ================================================================== */}
         {activeTab === "work" && (
           <>
             {/* Hoy */}
             <Card>
-              <CardHeader
-                title={`Hoy (${dateKey})`}
-                subtitle={me ? `Empleado: ${me.employee.fullName}` : "Cargando empleado…"}
-              />
+              <CardHeader title={`Hoy (${dateKey})`} subtitle={me ? `Empleado: ${me.employee.fullName}` : "Cargando empleado…"} />
               <CardBody>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Entrada</div>
-                    <div className="mt-1 text-lg font-semibold text-zinc-900">
-                      {fmtTime(todayRow?.checkInAt ?? null)}
-                    </div>
+                    <div className="mt-1 text-lg font-semibold text-zinc-900">{fmtTime(todayRow?.checkInAt ?? null)}</div>
                   </div>
 
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Salida</div>
-                    <div className="mt-1 text-lg font-semibold text-zinc-900">
-                      {fmtTime(todayRow?.checkOutAt ?? null)}
-                    </div>
+                    <div className="mt-1 text-lg font-semibold text-zinc-900">{fmtTime(todayRow?.checkOutAt ?? null)}</div>
                   </div>
 
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Horas hoy</div>
-                    <div className="mt-1 text-lg font-semibold text-zinc-900">
-                      {todayRow ? `${todayRow.hours} h` : "—"}
-                    </div>
+                    <div className="mt-1 text-lg font-semibold text-zinc-900">{todayRow ? `${todayRow.hours} h` : "—"}</div>
                   </div>
                 </div>
 
@@ -597,27 +661,16 @@ export default function CashierPanelPage() {
                     Marcar Entrada
                   </Button>
 
-                  <Button
-                    variant="secondary"
-                    onClick={checkOut}
-                    disabled={busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt}
-                    loading={busy}
-                  >
+                  <Button variant="secondary" onClick={checkOut} disabled={busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt} loading={busy}>
                     Marcar Salida
                   </Button>
 
                   <Field label="Día">
-                    <Input
-                      type="date"
-                      value={dateKey}
-                      onChange={(e) => setDateKey(e.target.value)}
-                    />
+                    <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
                   </Field>
                 </div>
 
-                <p className="mt-3 text-xs text-zinc-500">
-                  *Esto es EXACTAMENTE el panel USER (horas + tareas).
-                </p>
+                <p className="mt-3 text-xs text-zinc-500">*Esto es EXACTAMENTE el panel USER (horas + tareas).</p>
               </CardBody>
             </Card>
 
@@ -632,9 +685,7 @@ export default function CashierPanelPage() {
                         <TrendingUp className="h-4 w-4" />
                         Horas
                       </div>
-                      <div className="mt-1 text-2xl font-bold text-zinc-900">
-                        {summary ? `${summary.totals.totalHours} h` : "—"}
-                      </div>
+                      <div className="mt-1 text-2xl font-bold text-zinc-900">{summary ? `${summary.totals.totalHours} h` : "—"}</div>
                     </div>
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -642,12 +693,8 @@ export default function CashierPanelPage() {
                         <BadgeDollarSign className="h-4 w-4" />
                         Total ($)
                       </div>
-                      <div className="mt-1 text-2xl font-bold text-zinc-900">
-                        {summary ? moneyARS(summary.totals.totalPay) : "—"}
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-500">
-                        Tarifa: {summary ? moneyARS(summary.employee.hourlyRate) : "—"} / hora
-                      </div>
+                      <div className="mt-1 text-2xl font-bold text-zinc-900">{summary ? moneyARS(summary.totals.totalPay) : "—"}</div>
+                      <div className="mt-1 text-xs text-zinc-500">Tarifa: {summary ? moneyARS(summary.employee.hourlyRate) : "—"} / hora</div>
                     </div>
                   </div>
 
@@ -695,9 +742,7 @@ export default function CashierPanelPage() {
 
                             <div className="text-right">
                               <div className="text-sm font-semibold text-zinc-900">{it.hours} h</div>
-                              {pending && (
-                                <div className="text-xs font-semibold text-amber-800">Falta salida</div>
-                              )}
+                              {pending && <div className="text-xs font-semibold text-amber-800">Falta salida</div>}
                             </div>
                           </div>
                         );
@@ -720,12 +765,7 @@ export default function CashierPanelPage() {
                   <div className="w-full sm:w-80">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <Input
-                        value={qTasks}
-                        onChange={(e) => setQTasks(e.target.value)}
-                        placeholder="Buscar por tarea o notas…"
-                        className="pl-9"
-                      />
+                      <Input value={qTasks} onChange={(e) => setQTasks(e.target.value)} placeholder="Buscar por tarea o notas…" className="pl-9" />
                     </div>
                   </div>
                 </div>
@@ -751,9 +791,7 @@ export default function CashierPanelPage() {
                             <div className="text-sm font-semibold text-zinc-900">{dk}</div>
                             <div className="text-xs text-zinc-500">{rows.length} tareas</div>
                           </div>
-                          <div className="text-zinc-600">
-                            {isOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                          </div>
+                          <div className="text-zinc-600">{isOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</div>
                         </button>
 
                         {isOpen && (
@@ -761,15 +799,9 @@ export default function CashierPanelPage() {
                             <table className="min-w-full">
                               <thead className="bg-white">
                                 <tr>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                                    Hora
-                                  </th>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                                    Tarea
-                                  </th>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                                    Notas
-                                  </th>
+                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Hora</th>
+                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tarea</th>
+                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Notas</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-zinc-100">
@@ -779,12 +811,8 @@ export default function CashierPanelPage() {
                                   .map((r) => (
                                     <tr key={r.id} className="hover:bg-zinc-50/60">
                                       <td className="px-4 py-3 text-sm text-zinc-700">{fmtDateTime(r.at)}</td>
-                                      <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
-                                        {r.taskName || r.taskId || "—"}
-                                      </td>
-                                      <td className="px-4 py-3 text-sm text-zinc-700">
-                                        {r.notes?.trim() ? r.notes : "—"}
-                                      </td>
+                                      <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{r.taskName || r.taskId || "—"}</td>
+                                      <td className="px-4 py-3 text-sm text-zinc-700">{r.notes?.trim() ? r.notes : "—"}</td>
                                     </tr>
                                   ))}
                               </tbody>
@@ -801,47 +829,27 @@ export default function CashierPanelPage() {
         )}
 
         {/* ================================================================== */}
-        {/* FINANCE TAB */}
+        {/* FINANCE TAB (DÍA) */}
         {/* ================================================================== */}
         {activeTab === "finance" && (
           <>
-            {/* Finance filters */}
+            {/* Finance day filter */}
             <Card>
-              <CardHeader
-                title="Stats de finanzas"
-                subtitle={stats?.range ? `Rango: ${stats.range.from} → ${stats.range.to}` : "Cargando…"}
-              />
+              <CardHeader title="Finanzas del día" subtitle={stats?.range ? `Rango: ${stats.range.from} → ${stats.range.to}` : "Cargando…"} />
               <CardBody>
-                <div className="grid gap-3 lg:grid-cols-[220px_220px_220px_1fr] lg:items-end">
-                  <Field label="Período">
-                    <Select value={periodType} onChange={(e) => setPeriodType(e.target.value as PeriodType)}>
-                      <option value="day">Día</option>
-                      <option value="week">Semana</option>
-                      <option value="month">Mes</option>
-                      <option value="custom">Rango</option>
-                    </Select>
+                <div className="grid gap-3 lg:grid-cols-[260px_1fr] lg:items-end">
+                  <Field label="Día (dateKey)">
+                    <Input
+                      type="date"
+                      value={financeDateKey}
+                      onChange={(e) => {
+                        setFinanceDateKey(e.target.value);
+                        setMovPage(1);
+                      }}
+                    />
                   </Field>
 
-                  {periodType !== "custom" ? (
-                    <Field label="Fecha base">
-                      <Input
-                        type="date"
-                        value={financeDateKey}
-                        onChange={(e) => setFinanceDateKey(e.target.value)}
-                      />
-                    </Field>
-                  ) : (
-                    <>
-                      <Field label="Desde">
-                        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-                      </Field>
-                      <Field label="Hasta">
-                        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-                      </Field>
-                    </>
-                  )}
-
-                  <Field label="Buscar cuenta">
+                  <Field label="Buscar cuenta (tabla por cuenta)">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                       <Input
@@ -859,32 +867,23 @@ export default function CashierPanelPage() {
             {/* Totals */}
             <div className="grid gap-4 md:grid-cols-4">
               <Card>
-                <CardHeader title="Ingresos" subtitle="Total del rango" />
+                <CardHeader title="Ingresos" subtitle="Total del día" />
                 <CardBody>
-                  <div className="text-2xl font-bold text-zinc-900">
-                    {stats ? moneyARS(stats.totals.income) : "—"}
-                  </div>
+                  <div className="text-2xl font-bold text-zinc-900">{stats ? moneyARS(stats.totals.income) : "—"}</div>
                 </CardBody>
               </Card>
 
               <Card>
-                <CardHeader title="Gastos" subtitle="Total del rango" />
+                <CardHeader title="Gastos" subtitle="Total del día" />
                 <CardBody>
-                  <div className="text-2xl font-bold text-zinc-900">
-                    {stats ? moneyARS(stats.totals.expense) : "—"}
-                  </div>
+                  <div className="text-2xl font-bold text-zinc-900">{stats ? moneyARS(stats.totals.expense) : "—"}</div>
                 </CardBody>
               </Card>
 
               <Card>
                 <CardHeader title="Neto" subtitle="Ingresos - Gastos" />
                 <CardBody>
-                  <div
-                    className={cn(
-                      "text-2xl font-bold",
-                      (stats?.totals.net ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"
-                    )}
-                  >
+                  <div className={cn("text-2xl font-bold", (stats?.totals.net ?? 0) >= 0 ? "text-emerald-700" : "text-red-700")}>
                     {stats ? moneyARS(stats.totals.net) : "—"}
                   </div>
                 </CardBody>
@@ -896,15 +895,11 @@ export default function CashierPanelPage() {
                   <div className="space-y-1 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Sale</span>
-                      <span className="font-semibold text-zinc-900">
-                        {stats ? moneyARS(stats.totals.transferOut) : "—"}
-                      </span>
+                      <span className="font-semibold text-zinc-900">{stats ? moneyARS(stats.totals.transferOut) : "—"}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Entra</span>
-                      <span className="font-semibold text-zinc-900">
-                        {stats ? moneyARS(stats.totals.transferIn) : "—"}
-                      </span>
+                      <span className="font-semibold text-zinc-900">{stats ? moneyARS(stats.totals.transferIn) : "—"}</span>
                     </div>
                     <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
                       <ArrowDownUp className="h-4 w-4" />
@@ -915,43 +910,197 @@ export default function CashierPanelPage() {
               </Card>
             </div>
 
+            {/* Movements */}
+            <Card>
+              <CardHeader title="Movimientos del día" subtitle="Ingresos / Gastos / Transferencias" />
+              <CardBody>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Field label="Tipo">
+                    <Select
+                      value={movType}
+                      onChange={(e) => {
+                        setMovType(e.target.value as any);
+                        setMovPage(1);
+                      }}
+                    >
+                      <option value="">Todos</option>
+                      <option value="INCOME">Ingreso</option>
+                      <option value="EXPENSE">Gasto</option>
+                      <option value="TRANSFER">Transfer</option>
+                    </Select>
+                  </Field>
+
+                  <Field label="Cuenta">
+                    <Select
+                      value={movAccountId}
+                      onChange={(e) => {
+                        setMovAccountId(e.target.value);
+                        setMovPage(1);
+                      }}
+                    >
+                      <option value="">Todas</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+
+                  <Field label="Categoría">
+                    <Select
+                      value={movCategoryId}
+                      onChange={(e) => {
+                        setMovCategoryId(e.target.value);
+                        setMovPage(1);
+                      }}
+                    >
+                      <option value="">Todas</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+
+                  <Field label="Buscar">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                      <Input
+                        className="pl-9"
+                        placeholder="Notas / cuenta / categoría…"
+                        value={movQ}
+                        onChange={(e) => {
+                          setMovQ(e.target.value);
+                          setMovPage(1);
+                        }}
+                      />
+                    </div>
+                  </Field>
+                </div>
+
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-zinc-200">
+                  <table className="min-w-full">
+                    <thead className="bg-zinc-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Hora</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tipo</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Cuenta</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Categoría</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Monto</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Notas</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Acciones</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-zinc-100">
+                      {movLoading || !movs ? (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-6 text-sm text-zinc-500">
+                            Cargando movimientos…
+                          </td>
+                        </tr>
+                      ) : movs.items.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-6 text-sm text-zinc-500">
+                            No hay movimientos para este día.
+                          </td>
+                        </tr>
+                      ) : (
+                        movs.items.map((r) => {
+                          const typeLabel = r.type === "INCOME" ? "Ingreso" : r.type === "EXPENSE" ? "Gasto" : "Transfer";
+
+                          const accName =
+                            r.accountNameSnapshot ||
+                            (r.accountId ? accountNameById.get(r.accountId) : null) ||
+                            r.accountId ||
+                            "—";
+
+                          const toAccName = r.toAccountId ? accountNameById.get(r.toAccountId) || r.toAccountId : null;
+
+                          const catName =
+                            r.categoryNameSnapshot ||
+                            (r.categoryId ? categoryNameById.get(r.categoryId) : null) ||
+                            (r.categoryId ? r.categoryId : null) ||
+                            (r.type === "TRANSFER" ? "—" : "Sin categoría");
+
+                          return (
+                            <tr key={r.id} className="hover:bg-zinc-50/60">
+                              <td className="px-4 py-3 text-sm text-zinc-700">{fmtTime(r.createdAt ?? null)}</td>
+
+                              <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{typeLabel}</td>
+
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                {r.type === "TRANSFER" ? (
+                                  <span>
+                                    {accName} <span className="text-zinc-400">→</span> {toAccName || "—"}
+                                  </span>
+                                ) : (
+                                  accName
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3 text-sm text-zinc-700">{catName}</td>
+
+                              <td className="px-4 py-3 text-right text-sm font-bold text-zinc-900">{moneyARS(r.amount)}</td>
+
+                              <td className="px-4 py-3 text-sm text-zinc-700">{r.notes?.trim() ? r.notes : "—"}</td>
+
+                              <td className="px-4 py-3 text-right">
+                                <Button variant="secondary" disabled={busy || r.status === "VOID"} onClick={() => voidMovement(r.id)}>
+                                  {r.status === "VOID" ? "Anulado" : "Anular"}
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {movs && movs.total > movLimit && (
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="text-xs text-zinc-500">
+                      Página {movs.page} · {movs.total} movimientos
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="secondary" disabled={busy || movPage <= 1} onClick={() => setMovPage((p) => Math.max(1, p - 1))}>
+                        Anterior
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={busy || (movs.page * movs.limit >= movs.total)}
+                        onClick={() => setMovPage((p) => p + 1)}
+                      >
+                        Siguiente
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+
             {/* By account */}
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <div className="border-b border-zinc-100 px-5 py-4">
                 <h2 className="text-lg font-semibold text-zinc-900">Por cuenta</h2>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Ingresos, gastos, transferencias y saldo inicio/fin.
-                </p>
+                <p className="mt-1 text-sm text-zinc-500">Ingresos, gastos, transferencias y saldo inicio/fin.</p>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="min-w-full">
                   <thead className="bg-zinc-50">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Cuenta
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Ingresos
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Gastos
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Neto
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Transf. In
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Transf. Out
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Saldo Inicio
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Saldo Fin
-                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Cuenta</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Ingresos</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Gastos</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Neto</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Transf. In</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Transf. Out</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Saldo Inicio</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Saldo Fin</th>
                     </tr>
                   </thead>
 
@@ -977,26 +1126,15 @@ export default function CashierPanelPage() {
                               <div className="text-sm font-semibold text-zinc-900">{name}</div>
                               <div className="text-xs text-zinc-500">{r.accountId}</div>
                             </td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
-                              {moneyARS(r.income)}
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
-                              {moneyARS(r.expense)}
-                            </td>
-                            <td
-                              className={cn(
-                                "px-4 py-3 text-right text-sm font-bold",
-                                r.net >= 0 ? "text-emerald-700" : "text-red-700"
-                              )}
-                            >
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.income)}</td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.expense)}</td>
+                            <td className={cn("px-4 py-3 text-right text-sm font-bold", r.net >= 0 ? "text-emerald-700" : "text-red-700")}>
                               {moneyARS(r.net)}
                             </td>
                             <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.transferIn)}</td>
                             <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.transferOut)}</td>
                             <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.startBalance)}</td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
-                              {moneyARS(r.endBalance)}
-                            </td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.endBalance)}</td>
                           </tr>
                         );
                       })
@@ -1018,18 +1156,10 @@ export default function CashierPanelPage() {
                   <table className="min-w-full">
                     <thead className="bg-zinc-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Tipo
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Categoría
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Total
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Movs
-                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tipo</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Categoría</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Total</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Movs</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
@@ -1042,21 +1172,15 @@ export default function CashierPanelPage() {
                       ) : categoryRows.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
-                            No hay categorías en este rango.
+                            No hay categorías en este día.
                           </td>
                         </tr>
                       ) : (
                         categoryRows.slice(0, 30).map((r, idx) => (
                           <tr key={`${r.type}-${r.categoryId ?? "null"}-${idx}`} className="hover:bg-zinc-50/60">
-                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
-                              {r.type === "EXPENSE" ? "GASTO" : "INGRESO"}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-zinc-700">
-                              {r.nameSnapshot || r.categoryId || "Sin categoría"}
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
-                              {moneyARS(r.total)}
-                            </td>
+                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{r.type === "EXPENSE" ? "GASTO" : "INGRESO"}</td>
+                            <td className="px-4 py-3 text-sm text-zinc-700">{r.nameSnapshot || r.categoryId || "Sin categoría"}</td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.total)}</td>
                             <td className="px-4 py-3 text-right text-sm text-zinc-700">{r.count}</td>
                           </tr>
                         ))
@@ -1068,26 +1192,18 @@ export default function CashierPanelPage() {
 
               <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <div className="border-b border-zinc-100 px-5 py-4">
-                  <h2 className="text-lg font-semibold text-zinc-900">Evolución diaria</h2>
-                  <p className="mt-1 text-sm text-zinc-500">Ingresos, gastos y neto por día.</p>
+                  <h2 className="text-lg font-semibold text-zinc-900">Evolución (día)</h2>
+                  <p className="mt-1 text-sm text-zinc-500">Para "día" normalmente es 1 fila.</p>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="min-w-full">
                     <thead className="bg-zinc-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Día
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Ingresos
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Gastos
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Neto
-                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Día</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Ingresos</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Gastos</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Neto</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
@@ -1100,7 +1216,7 @@ export default function CashierPanelPage() {
                       ) : stats.seriesDaily.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
-                            No hay datos en este rango.
+                            No hay datos en este día.
                           </td>
                         </tr>
                       ) : (
@@ -1109,12 +1225,7 @@ export default function CashierPanelPage() {
                             <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{r.dateKey}</td>
                             <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.income)}</td>
                             <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.expense)}</td>
-                            <td
-                              className={cn(
-                                "px-4 py-3 text-right text-sm font-bold",
-                                r.net >= 0 ? "text-emerald-700" : "text-red-700"
-                              )}
-                            >
+                            <td className={cn("px-4 py-3 text-right text-sm font-bold", r.net >= 0 ? "text-emerald-700" : "text-red-700")}>
                               {moneyARS(r.net)}
                             </td>
                           </tr>
@@ -1140,17 +1251,9 @@ export default function CashierPanelPage() {
                   <Button variant="secondary" onClick={() => (window.location.href = "/cashier/closing")}>
                     Cierre del día
                   </Button>
-                  <Button variant="secondary" onClick={() => (window.location.href = "/admin/finance/accounts")}>
-                    Cuentas
-                  </Button>
-                  <Button variant="secondary" onClick={() => (window.location.href = "/admin/finance/categories")}>
-                    Categorías
-                  </Button>
                 </div>
 
-                <p className="mt-3 text-xs text-zinc-500">
-                  Estas rutas las armamos después (movimientos + cierre UI). Este panel ya muestra stats.
-                </p>
+                <p className="mt-3 text-xs text-zinc-500">Después agregamos creación inline de movimientos y cierre UI.</p>
               </CardBody>
             </Card>
           </>

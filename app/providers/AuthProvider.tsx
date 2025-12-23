@@ -1,7 +1,15 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { apiFetch } from "@/lib/api";
+import { setTokenGetter } from "@/redux/services/baseApi";
 
 type User = { id: string; email: string; roles: string[] };
 
@@ -26,10 +34,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
   async function login(email: string, password: string) {
-    const data = await apiFetch<{ access_token: string; user: User }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
+    const data = await apiFetch<{ access_token: string; user: User }>(
+      "/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }
+    );
 
     setAccessToken(data.access_token);
     setUser(data.user);
@@ -40,9 +51,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     refreshPromiseRef.current = (async () => {
       try {
-        const data = await apiFetch<{ access_token: string; user: User }>("/auth/refresh", {
-          method: "POST",
-        });
+        const data = await apiFetch<{ access_token: string; user: User }>(
+          "/auth/refresh",
+          {
+            method: "POST",
+          }
+        );
         setAccessToken(data.access_token);
         setUser(data.user);
         return data.access_token;
@@ -70,6 +84,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // si no hay (reload), intentamos refresh por cookie
     return await refresh();
   }
+  useEffect(() => {
+    setTokenGetter(getAccessToken);
+  }, [getAccessToken]);
 
   useEffect(() => {
     (async () => {
@@ -80,8 +97,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, accessToken, loading, login, refresh, logout, getAccessToken }),
-    [user, accessToken, loading],
+    () => ({
+      user,
+      accessToken,
+      loading,
+      login,
+      refresh,
+      logout,
+      getAccessToken,
+    }),
+    [user, accessToken, loading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

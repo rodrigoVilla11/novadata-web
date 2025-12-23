@@ -1,5 +1,6 @@
 import "./globals.css";
 import { AuthProvider } from "./providers/AuthProvider";
+import { ReduxProvider } from "./providers/ReduxProvider";
 
 export default function RootLayout({
   children,
@@ -9,7 +10,9 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <ReduxProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ReduxProvider>
       </body>
     </html>
   );
