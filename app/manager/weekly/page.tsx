@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   weeklySyncApi,
   WeeklyMessage,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/weeklySyncApi";
 import { Protected } from "@/components/Protected";
 import { useAuth } from "@/app/providers/AuthProvider";
+import { RefreshCcw } from "lucide-react";
 
 function fmtWeekRange(thread?: WeeklyThread | null) {
   if (!thread) return "";
@@ -46,7 +48,6 @@ function typeLabel(t: WeeklyMessageType) {
 }
 
 function typeBadgeClass(t: WeeklyMessageType) {
-  // sin colores “hardcodeados” demasiado, solo clases suaves
   switch (t) {
     case "avance":
       return "bg-emerald-50 text-emerald-700 border-emerald-200";
@@ -64,8 +65,9 @@ function typeBadgeClass(t: WeeklyMessageType) {
 }
 
 export default function WeeklySyncPage() {
+  const router = useRouter();
   const { getAccessToken, user, loading } = useAuth();
-  console.log("Auth loading:", loading, "user:", user);
+
   const [isBooting, setIsBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,12 +75,12 @@ export default function WeeklySyncPage() {
   const [weeks, setWeeks] = useState<WeeklyThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>("");
 
-  const selectedThread = useMemo(
-    () =>
-      weeks.find((w) => w.id === selectedThreadId) ||
-      (current?.id === selectedThreadId ? current : null),
-    [weeks, selectedThreadId, current]
-  );
+  const selectedThread = useMemo(() => {
+    const fromWeeks = weeks.find((w) => w.id === selectedThreadId) || null;
+    if (fromWeeks) return fromWeeks;
+    if (current?.id === selectedThreadId) return current;
+    return null;
+  }, [weeks, selectedThreadId, current]);
 
   // Mensajes
   const [items, setItems] = useState<WeeklyMessage[]>([]);
@@ -98,9 +100,20 @@ export default function WeeklySyncPage() {
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const canUse = useMemo(() => {
-    const roles = user?.roles || [];
+    const roles = (user?.roles ?? []).map((r: string) =>
+      String(r).toUpperCase()
+    );
     return roles.includes("ADMIN") || roles.includes("MANAGER");
   }, [user]);
+
+  function goBack() {
+    // back si existe history, si no, fallback
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/manager");
+    }
+  }
 
   async function boot() {
     setIsBooting(true);
@@ -115,7 +128,6 @@ export default function WeeklySyncPage() {
       setCurrent(cur);
       setWeeks(ws);
 
-      // selecciona semana actual por default
       const defaultId = cur?.id || ws?.[0]?.id || "";
       setSelectedThreadId(defaultId);
     } catch (e: any) {
@@ -135,6 +147,7 @@ export default function WeeklySyncPage() {
 
     try {
       const cursor = mode === "more" ? nextCursor : undefined;
+
       const res = await weeklySyncApi.listMessages(getAccessToken, threadId, {
         limit: 50,
         cursor: cursor || undefined,
@@ -154,11 +167,14 @@ export default function WeeklySyncPage() {
     }
   }
 
-  // boot
+  // boot: esperá a que auth termine
   useEffect(() => {
+    if (loading) return;
+    if (!user) return; // Protected probablemente te redirige, igual lo dejamos robusto
+    if (!canUse) return;
     boot();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loading, user?.id, canUse]);
 
   // cuando cambia thread, reset mensajes
   useEffect(() => {
@@ -169,15 +185,12 @@ export default function WeeklySyncPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedThreadId]);
 
-  // scroll: como vienen DESC (nuevo arriba), mantenemos “chat” con nuevo arriba y botón cargar más.
-  // Si preferís nuevo abajo, lo invertimos, pero esto funciona bien para weekly sync tipo “bitácora”.
   const pinnedItems = useMemo(() => items.filter((m) => m.pinned), [items]);
   const normalItems = useMemo(() => items.filter((m) => !m.pinned), [items]);
 
   async function onSend() {
     const t = text.trim();
     if (!t) return;
-
     if (!selectedThreadId) return;
 
     setIsSending(true);
@@ -201,7 +214,6 @@ export default function WeeklySyncPage() {
       setPinned(false);
       setType("otro");
 
-      // opcional: scroll a top si querés
       listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e: any) {
       setError(String(e?.message || e));
@@ -223,7 +235,6 @@ export default function WeeklySyncPage() {
         { summary: summary.trim() }
       );
 
-      // actualizar en lista
       setCurrent((prev) => (prev?.id === updated.id ? updated : prev));
       setWeeks((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
     } catch (e: any) {
@@ -232,11 +243,6 @@ export default function WeeklySyncPage() {
       setIsClosing(false);
     }
   }
-  fetch(`${process.env.NEXT_PUBLIC_API_BASE}/weekly-sync/current`, {
-    credentials: "include",
-  })
-    .then((r) => r.text())
-    .then(console.log);
 
   if (!canUse) {
     return (
@@ -259,11 +265,39 @@ export default function WeeklySyncPage() {
     <Protected>
       <div className="min-h-screen bg-zinc-50">
         <div className="mx-auto max-w-6xl px-4 py-6">
-          <div className="mb-4 flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-zinc-900">Weekly Sync</h1>
-            <p className="text-sm text-zinc-600">
-              Chat semanal entre Manager y Admin (con cierre y resumen).
-            </p>
+          {/* Header (acá va el VOLVER) */}
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold text-zinc-900">Weekly Sync</h1>
+              <p className="text-sm text-zinc-600">
+                Chat semanal entre Manager y Admin (con cierre y resumen).
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={boot}
+                disabled={isBooting}
+                className="
+    inline-flex items-center gap-2
+    rounded-xl border bg-white px-3 py-2
+    text-sm font-semibold text-zinc-900
+    hover:bg-zinc-50
+    disabled:opacity-60 disabled:cursor-not-allowed
+  "
+              >
+                {isBooting ? (
+                  <>
+                    Cargando…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCcw className="h-4 w-4" />
+                    
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -276,22 +310,13 @@ export default function WeeklySyncPage() {
             {/* Sidebar weeks */}
             <div className="lg:col-span-4">
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-zinc-900">
-                      Semanas
-                    </div>
-                    <div className="text-xs text-zinc-500">
-                      Elegí una para ver mensajes
-                    </div>
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900">
+                    Semanas
                   </div>
-                  <button
-                    onClick={boot}
-                    className="rounded-lg border bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50"
-                    disabled={isBooting}
-                  >
-                    Refrescar
-                  </button>
+                  <div className="text-xs text-zinc-500">
+                    Elegí una para ver mensajes
+                  </div>
                 </div>
 
                 <div className="mt-3 space-y-2">
@@ -367,6 +392,7 @@ export default function WeeklySyncPage() {
                                       : "Cerrada"}
                                   </span>
                                 </div>
+
                                 {w.summary ? (
                                   <div className="mt-1 line-clamp-2 text-xs text-zinc-600">
                                     {w.summary}
@@ -522,7 +548,6 @@ export default function WeeklySyncPage() {
                         placeholder="Escribí el update semanal…"
                         className="w-full resize-none rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 text-black focus:ring-zinc-200"
                         onKeyDown={(e) => {
-                          // Ctrl/Cmd + Enter para enviar
                           if ((e.ctrlKey || e.metaKey) && e.key === "Enter")
                             onSend();
                         }}
@@ -595,7 +620,6 @@ export default function WeeklySyncPage() {
 }
 
 function MessageCard({ m, isMine }: { m: WeeklyMessage; isMine: boolean }) {
-  console.log("Rendering message:", m);
   const date = m.createdAt ? new Date(m.createdAt) : null;
   const when = date
     ? date.toLocaleString("es-AR", {
@@ -606,7 +630,9 @@ function MessageCard({ m, isMine }: { m: WeeklyMessage; isMine: boolean }) {
         minute: "2-digit",
       })
     : "";
+
   const authorLabel = m.author_email;
+
   return (
     <div
       className={[

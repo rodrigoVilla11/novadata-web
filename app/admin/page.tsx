@@ -4,7 +4,6 @@ import Link from "next/link";
 import React, { useMemo } from "react";
 import { useAuth } from "@/app/providers/AuthProvider";
 
-// Si ya los tenés instalados (los venías usando), suma mucho:
 import {
   Users,
   ClipboardList,
@@ -40,11 +39,12 @@ function CardLink({
     <Link
       href={href}
       className={cn(
-        "group block rounded-2xl border bg-white p-5 shadow-sm transition",
-        "hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-4",
+        "group block rounded-2xl border bg-white p-5 transition",
+        "hover:-translate-y-0.5 hover:shadow-md",
+        "focus:outline-none focus:ring-4 focus:ring-emerald-100",
         tone === "admin"
-          ? "border-indigo-200 hover:border-indigo-300 focus:ring-indigo-100"
-          : "border-zinc-200 hover:border-zinc-300 focus:ring-zinc-100"
+          ? "border-indigo-200 hover:border-indigo-300"
+          : "border-zinc-200 hover:border-[#144336]/40"
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -54,7 +54,7 @@ function CardLink({
               "mt-0.5 rounded-xl p-2 border",
               tone === "admin"
                 ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-                : "border-zinc-200 bg-zinc-50 text-zinc-700"
+                : "border-zinc-200 bg-zinc-50 text-[#144336]"
             )}
           >
             {icon}
@@ -65,6 +65,7 @@ function CardLink({
               <div className="text-base font-semibold text-zinc-900">
                 {title}
               </div>
+
               {badge && (
                 <span
                   className={cn(
@@ -115,7 +116,7 @@ function SectionHeader({
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-900">{title}</h2>
+        <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
         {subtitle && <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>}
       </div>
       {right}
@@ -177,90 +178,90 @@ export default function AdminHomePage() {
   );
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
-        {/* Header */}
-        <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-bold text-zinc-900">
-                Dashboard Admin
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500">
-                Accesos rápidos para operar el día.
-              </p>
+    <div className="space-y-6">
+      {/* Hero / Header */}
+      <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        {/* acento marca */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[#144336]" />
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {roles.length > 0 ? (
-                  roles.map((r) => (
-                    <span
-                      key={r}
-                      className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700"
-                    >
-                      {r}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-zinc-500">Sin roles</span>
-                )}
-              </div>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+              Dashboard Admin
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              Accesos rápidos para operar el día.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {roles.length > 0 ? (
+                roles.map((r) => (
+                  <span
+                    key={r}
+                    className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700"
+                  >
+                    {r}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-zinc-500">Sin roles</span>
+              )}
             </div>
-
-            {/* CTA admin (si aplica) */}
-            {isAdmin && (
-              <Link
-                href="/admin/users"
-                className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 focus:outline-none focus:ring-4 focus:ring-zinc-200"
-              >
-                <Shield className="h-4 w-4" />
-                Usuarios & Roles
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            )}
           </div>
-        </div>
 
-        {/* Operación diaria */}
+          {isAdmin && (
+            <Link
+              href="/admin/users"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
+            >
+              <Shield className="h-4 w-4" />
+              Usuarios & Roles
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* Operación diaria */}
+      <div className="space-y-3">
+        <SectionHeader
+          title="Operación diaria"
+          subtitle="Lo más usado para gestionar el día a día."
+        />
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {quickLinks.map((x) => (
+            <CardLink key={x.href} {...x} />
+          ))}
+        </div>
+      </div>
+
+      {/* Administración (solo ADMIN) */}
+      {isAdmin && (
         <div className="space-y-3">
           <SectionHeader
-            title="Operación diaria"
-            subtitle="Lo más usado para gestionar el día a día."
+            title="Administración"
+            subtitle="Solo ADMIN: gestión de usuarios, roles y permisos."
           />
 
           <div className="grid gap-3 md:grid-cols-2">
-            {quickLinks.map((x) => (
-              <CardLink key={x.href} {...x} />
-            ))}
+            <CardLink
+              title="Usuarios"
+              desc="Crear usuarios, asignar roles y vincular empleados."
+              href="/admin/users"
+              icon={<Shield className="h-5 w-5" />}
+              badge="SOLO ADMIN"
+              tone="admin"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-5 text-sm text-indigo-900">
+            <b>Tip:</b> si un empleado no ve su panel, verificá el vínculo{" "}
+            <b>Usuario → Employee</b> y que tenga rol <b>MANAGER</b> o{" "}
+            <b>ADMIN</b> (o el que uses en tu app).
           </div>
         </div>
-
-        {/* Administración (solo ADMIN) */}
-        {isAdmin && (
-          <div className="space-y-3">
-            <SectionHeader
-              title="Administración"
-              subtitle="Solo ADMIN: gestión de usuarios, roles y permisos."
-            />
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <CardLink
-                title="Usuarios"
-                desc="Crear usuarios, asignar roles y vincular empleados."
-                href="/admin/users"
-                icon={<Shield className="h-5 w-5" />}
-                badge="SOLO ADMIN"
-                tone="admin"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-800">
-              Tip: si un empleado no ve su panel, verificá el vínculo{" "}
-              <b>Usuario → Employee</b> y que tenga rol
-              <b> MANAGER</b> o <b>ADMIN</b> (o el que uses en tu app).
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

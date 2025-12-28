@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 
-// Opcional (pero recomendado) si ya lo usás en el proyecto:
 import {
   RefreshCcw,
   Search,
@@ -19,6 +19,7 @@ import {
   ClipboardList,
   Filter,
   X,
+  ArrowLeft,
 } from "lucide-react";
 
 type EmployeeRow = { id: string; fullName: string };
@@ -79,8 +80,10 @@ function cn(...classes: Array<string | false | null | undefined>) {
 }
 
 export default function ProductionPage() {
+  const router = useRouter();
   const { getAccessToken, user } = useAuth() as any;
-  const roles: string[] = user?.roles || [];
+
+  const roles = (user?.roles || []).map((r: string) => String(r).toUpperCase());
   const allowed = roles.includes("ADMIN") || roles.includes("MANAGER");
 
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
@@ -163,7 +166,6 @@ export default function ProductionPage() {
     taskMap,
   ]);
 
-  // --- loading ---
   async function loadAll(opts?: { keepSelection?: boolean }) {
     setError(null);
     setOkMsg(null);
@@ -186,18 +188,15 @@ export default function ProductionPage() {
         getAccessToken,
         `/production?dateKey=${encodeURIComponent(dateKey)}&limit=500`
       );
-      setRows(prod);
+      setRows(Array.isArray(prod) ? prod : []);
 
       if (!opts?.keepSelection) {
         if (!employeeId && emps[0]?.id) setEmployeeId(emps[0].id);
         if (!taskId && activeTasks[0]?.id) setTaskId(activeTasks[0].id);
       }
-
-      // defaults for filters
-      if (!filterEmployeeId && employeeId) setFilterEmployeeId("");
-      if (!filterTaskId && taskId) setFilterTaskId("");
     } catch (e: any) {
       setError(e?.message || "Error cargando producción");
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -220,7 +219,6 @@ export default function ProductionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateKey, allowed]);
 
-  // --- actions ---
   async function createEntry() {
     if (!employeeId || !taskId) return;
 
@@ -228,23 +226,33 @@ export default function ProductionPage() {
     setOkMsg(null);
     setBusy(true);
 
+    const qtyValue = qty.trim() ? Number(qty) : null;
+    if (qty.trim() && !Number.isFinite(qtyValue)) {
+      setBusy(false);
+      setError("Cantidad inválida.");
+      return;
+    }
+
     try {
       await apiFetchAuthed(getAccessToken, "/production", {
         method: "POST",
         body: JSON.stringify({
           employeeId,
           taskId,
-          qty: qty.trim() ? Number(qty) : null,
+          qty: qtyValue,
           notes: notes.trim() ? notes.trim() : null,
         }),
       });
 
       setQty("");
       setNotes("");
+
+      // UX: foco en qty para carga rápida
       notesRef.current?.blur();
       qtyRef.current?.focus();
 
       await loadAll({ keepSelection: true });
+
       setOkMsg("Registro guardado ✔");
       window.setTimeout(() => setOkMsg(null), 2500);
     } catch (e: any) {
@@ -266,7 +274,9 @@ export default function ProductionPage() {
       await apiFetchAuthed(getAccessToken, `/production/${id}`, {
         method: "DELETE",
       });
+
       await loadAll({ keepSelection: true });
+
       setOkMsg("Eliminado ✔");
       window.setTimeout(() => setOkMsg(null), 2500);
     } catch (e: any) {
@@ -286,7 +296,7 @@ export default function ProductionPage() {
 
   if (!allowed) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
+      <div className="flex items-center justify-center py-20">
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-700">
           No autorizado (requiere ADMIN o MANAGER).
         </div>
@@ -301,11 +311,19 @@ export default function ProductionPage() {
     onlyWithNotes ||
     onlyWithQty;
 
+  const lastPerformedAt = useMemo(() => {
+    // Si tu backend ya devuelve ordenado DESC, rows[0] sirve.
+    // Si no, calculamos por seguridad:
+    const first = rows[0]?.performedAt;
+    if (first) return first;
+    return null;
+  }, [rows]);
+
   return (
-    <div className="min-h-screen bg-zinc-50">
-      {/* Sticky header */}
+    <div className="space-y-6">
+      {/* Sticky header (para ManagerShell) */}
       <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 py-4">
+        <div className="px-4 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -340,9 +358,18 @@ export default function ProductionPage() {
               <p className="mt-1 text-sm text-zinc-500">
                 Registrá qué hizo cada empleado y a qué hora.
               </p>
+
+              {!loading && lastPerformedAt && (
+                <div className="mt-2 text-xs text-zinc-500">
+                  Último:{" "}
+                  <b className="text-zinc-900">
+                    {fmtDateTime(lastPerformedAt)}
+                  </b>
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
               <Input
                 type="date"
                 value={dateKey}
@@ -357,7 +384,6 @@ export default function ProductionPage() {
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-                  Refrescar
                 </span>
               </Button>
             </div>
@@ -380,7 +406,8 @@ export default function ProductionPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
+      {/* Content */}
+      <div className="space-y-6">
         {/* Create card */}
         <Card>
           <CardHeader
@@ -393,6 +420,7 @@ export default function ProductionPage() {
                 <Select
                   value={employeeId}
                   onChange={(e) => setEmployeeId(e.target.value)}
+                  disabled={loading || busy}
                 >
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>
@@ -406,6 +434,7 @@ export default function ProductionPage() {
                 <Select
                   value={taskId}
                   onChange={(e) => setTaskId(e.target.value)}
+                  disabled={loading || busy}
                 >
                   {tasks.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -417,29 +446,34 @@ export default function ProductionPage() {
 
               <Field label="Cantidad (opcional)">
                 <Input
-                  id="prod-qty"
                   type="number"
                   value={qty}
                   onChange={(e) => setQty(e.target.value)}
                   placeholder="Ej: 10"
                   inputMode="numeric"
+                  disabled={busy}
                 />
               </Field>
 
               <Field label="Notas (opcional)">
                 <Input
-                  id="prod-notes"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Ej: antes de las 20hs"
+                  disabled={busy}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      createEntry();
+                    }
+                  }}
                 />
               </Field>
             </div>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-zinc-500">
-                Tip: si cargás muchos registros seguidos, dejá seleccionados
-                empleado/tarea y solo cambiá qty/notas.
+                Tip: <b>Ctrl/⌘ + Enter</b> para guardar rápido cuando estás en
+                Notas.
               </div>
 
               <Button
@@ -469,6 +503,7 @@ export default function ProductionPage() {
                     onChange={(e) => setQ(e.target.value)}
                     placeholder="Empleado, tarea, notas…"
                     className="pl-9"
+                    disabled={loading}
                   />
                 </div>
               </Field>
@@ -477,6 +512,7 @@ export default function ProductionPage() {
                 <Select
                   value={filterEmployeeId}
                   onChange={(e) => setFilterEmployeeId(e.target.value)}
+                  disabled={loading}
                 >
                   <option value="">Todos</option>
                   {employees.map((e) => (
@@ -491,6 +527,7 @@ export default function ProductionPage() {
                 <Select
                   value={filterTaskId}
                   onChange={(e) => setFilterTaskId(e.target.value)}
+                  disabled={loading}
                 >
                   <option value="">Todas</option>
                   {tasks.map((t) => (
@@ -561,14 +598,7 @@ export default function ProductionPage() {
                   Registros del día
                 </h2>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Fecha: <b className="text-zinc-900">{dateKey}</b>{" "}
-                  <span className="mx-2 text-zinc-300">•</span>
-                  Último:{" "}
-                  <b className="text-zinc-900">
-                    {rows[0]?.performedAt
-                      ? fmtDateTime(rows[0].performedAt)
-                      : "—"}
-                  </b>
+                  Fecha: <b className="text-zinc-900">{dateKey}</b>
                 </p>
               </div>
 
@@ -774,7 +804,7 @@ export default function ProductionPage() {
               disabled={busy || busyRefresh}
               loading={busyRefresh}
             >
-              Refrescar
+              <RefreshCcw className="h-4 w-4" />
             </Button>
           </div>
         </div>

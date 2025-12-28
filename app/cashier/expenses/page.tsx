@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +14,7 @@ import {
   PlusCircle,
   XCircle,
   CheckCircle2,
+  Trash2,
 } from "lucide-react";
 
 // ============================================================================
@@ -43,11 +45,34 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function parseAmountInput(raw: string) {
+  // acepta "200000" o "200.000" o "200,000" o "200,50"
+  const s = String(raw || "").trim();
+  if (!s) return 0;
+  const cleaned = s.replace(/\./g, "").replace(/,/g, ".");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Debounce simple
+function useDebouncedValue<T>(value: T, delayMs = 300) {
+  const [deb, setDeb] = useState(value);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDeb(value), delayMs);
+    return () => window.clearTimeout(t);
+  }, [value, delayMs]);
+  return deb;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
 type FinanceAccountRow = { id: string; name: string };
-type FinanceCategoryRow = { id: string; name: string; type: "INCOME" | "EXPENSE" | "BOTH" };
+type FinanceCategoryRow = {
+  id: string;
+  name: string;
+  type: "INCOME" | "EXPENSE" | "BOTH";
+};
 
 type FinanceMovementType = "INCOME" | "EXPENSE" | "TRANSFER";
 type FinanceMovementRow = {
@@ -86,6 +111,7 @@ type CreateFinanceMovementDto = {
 // Page
 // ============================================================================
 export default function CashierExpensesPage() {
+  const router = useRouter();
   const { getAccessToken } = useAuth();
 
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
@@ -93,7 +119,8 @@ export default function CashierExpensesPage() {
   const [accounts, setAccounts] = useState<FinanceAccountRow[]>([]);
   const [categories, setCategories] = useState<FinanceCategoryRow[]>([]);
 
-  const [loading, setLoading] = useState(true);
+  const [loadingBase, setLoadingBase] = useState(true);
+  const [loadingList, setLoadingList] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -107,9 +134,14 @@ export default function CashierExpensesPage() {
 
   // list
   const [q, setQ] = useState("");
+  const qDeb = useDebouncedValue(q, 300);
+
   const [page, setPage] = useState(1);
   const limit = 30;
   const [resp, setResp] = useState<FinanceMovementsResponse | null>(null);
+
+  // abort requests viejos (si tu apiFetch soporta signal, perfecto; si no, igual evitamos estados viejos)
+  const abortRef = useRef<AbortController | null>(null);
 
   const accountNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -130,73 +162,100 @@ export default function CashierExpensesPage() {
     sp.set("type", "EXPENSE");
     sp.set("limit", String(limit));
     sp.set("page", String(page));
-    if (q.trim()) sp.set("q", q.trim());
+    if (qDeb.trim()) sp.set("q", qDeb.trim());
     return `/finance/movements?${sp.toString()}`;
   }
 
   async function loadBase() {
     setError(null);
-    setLoading(true);
+    setLoadingBase(true);
     try {
       const [acc, cats] = await Promise.all([
-        apiFetchAuthed<FinanceAccountRow[]>(getAccessToken, "/finance/accounts?active=true"),
-        apiFetchAuthed<FinanceCategoryRow[]>(getAccessToken, "/finance/categories?active=true&type=EXPENSE"),
+        apiFetchAuthed<FinanceAccountRow[]>(
+          getAccessToken,
+          "/finance/accounts?active=true"
+        ),
+        apiFetchAuthed<FinanceCategoryRow[]>(
+          getAccessToken,
+          "/finance/categories?active=true&type=EXPENSE"
+        ),
       ]);
 
-      setAccounts(acc);
-      const filteredCats = (cats || []).filter((c) => c.type === "EXPENSE" || c.type === "BOTH");
-      setCategories(filteredCats);
+      const accList = acc || [];
+      const catList = (cats || []).filter(
+        (c) => c.type === "EXPENSE" || c.type === "BOTH"
+      );
 
-      if (!accountId && acc[0]?.id) setAccountId(acc[0].id);
-      if (!categoryId && filteredCats[0]?.id) setCategoryId(filteredCats[0].id);
+      setAccounts(accList);
+      setCategories(catList);
+
+      // defaults (solo si no hay seleccion actual)
+      setAccountId((prev) => prev || accList[0]?.id || "");
+      setCategoryId((prev) => prev || catList[0]?.id || "");
     } catch (e: any) {
       setError(e?.message || "Error cargando cuentas/categorías");
     } finally {
-      setLoading(false);
+      setLoadingBase(false);
     }
   }
 
   async function loadList() {
     setError(null);
+    setLoadingList(true);
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     try {
-      const r = await apiFetchAuthed<FinanceMovementsResponse>(getAccessToken, buildListUrl());
+      const r = await apiFetchAuthed<FinanceMovementsResponse>(
+        getAccessToken,
+        buildListUrl()
+      );
+      if (ac.signal.aborted) return;
       setResp(r);
     } catch (e: any) {
+      if (String(e?.name || "").includes("Abort")) return;
       setError(e?.message || "Error cargando gastos");
+    } finally {
+      if (!ac.signal.aborted) setLoadingList(false);
     }
   }
 
-  async function loadAll() {
-    await Promise.all([loadBase(), loadList()]);
+  async function refreshAll() {
+    setBusy(true);
+    setOkMsg(null);
+    setError(null);
+    try {
+      await Promise.all([loadBase(), loadList()]);
+      setOkMsg("Actualizado ✔");
+      window.setTimeout(() => setOkMsg(null), 2000);
+    } finally {
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
-    loadAll();
+    loadBase();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     setPage(1);
-  }, [dateKey]);
+  }, [dateKey, qDeb]);
 
   useEffect(() => {
     loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateKey, q, page]);
+  }, [dateKey, qDeb, page]);
 
   async function createExpense() {
     setError(null);
     setOkMsg(null);
 
-    const amt = Number(amount.replace(",", "."));
-    if (!(amt > 0)) {
-      setError("Monto inválido");
-      return;
-    }
-    if (!accountId) {
-      setError("Seleccioná una cuenta");
-      return;
-    }
+    const amt = parseAmountInput(amount);
+    if (!(amt > 0)) return setError("Monto inválido");
+    if (!accountId) return setError("Seleccioná una cuenta");
 
     setBusy(true);
     try {
@@ -233,7 +292,9 @@ export default function CashierExpensesPage() {
     setError(null);
     setOkMsg(null);
     try {
-      await apiFetchAuthed(getAccessToken, `/finance/movements/${id}/void`, { method: "POST" });
+      await apiFetchAuthed(getAccessToken, `/finance/movements/${id}/void`, {
+        method: "POST",
+      });
       setOkMsg("Gasto anulado ✔");
       window.setTimeout(() => setOkMsg(null), 2000);
       await loadList();
@@ -244,10 +305,22 @@ export default function CashierExpensesPage() {
     }
   }
 
-  const totalDay = useMemo(() => {
+  const totalDayPosted = useMemo(() => {
     const items = resp?.items || [];
-    return items.reduce((acc, r) => acc + (r.status === "VOID" ? 0 : Number(r.amount || 0)), 0);
+    return items.reduce(
+      (acc, r) => acc + (r.status === "VOID" ? 0 : Number(r.amount || 0)),
+      0
+    );
   }, [resp]);
+
+  const voidCount = useMemo(() => {
+    const items = resp?.items || [];
+    return items.filter((r) => r.status === "VOID").length;
+  }, [resp]);
+
+  const parsedPreview = useMemo(() => parseAmountInput(amount), [amount]);
+
+  const loading = loadingBase || loadingList;
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -255,42 +328,45 @@ export default function CashierExpensesPage() {
         <div className="mx-auto max-w-5xl px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-                  onClick={() => (window.location.href = "/cashier")}
+                  onClick={() => router.push("/cashier")}
                   type="button"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   Volver
                 </button>
 
-                <h1 className="text-2xl font-bold text-zinc-900">Cashier • Gastos</h1>
+                <h1 className="text-2xl font-bold text-zinc-900">
+                  Cashier • Gastos
+                </h1>
 
                 <span className="ml-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-                  Total día: {moneyARS(totalDay)}
+                  Total día: {moneyARS(totalDayPosted)}
                 </span>
+
+                {voidCount > 0 && (
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
+                    Anulados: {voidCount}
+                  </span>
+                )}
               </div>
 
-              <p className="mt-1 text-sm text-zinc-500">Carga rápida de gastos y listado del día.</p>
+              <p className="mt-1 text-sm text-zinc-500">
+                Carga rápida de gastos y listado del día.
+              </p>
             </div>
 
             <Button
               variant="secondary"
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await loadAll();
-                } finally {
-                  setBusy(false);
-                }
-              }}
+              onClick={refreshAll}
               disabled={busy}
               loading={busy}
             >
               <span className="inline-flex items-center gap-2">
                 <RefreshCcw className="h-4 w-4" />
-                Refrescar
+    
               </span>
             </Button>
           </div>
@@ -315,19 +391,61 @@ export default function CashierExpensesPage() {
       <div className="mx-auto max-w-5xl px-4 py-6 space-y-6">
         {/* Form */}
         <Card>
-          <CardHeader title="Nuevo gasto" subtitle="Crea un movimiento EXPENSE" />
+          <CardHeader
+            title="Nuevo gasto"
+            subtitle="Crea un movimiento EXPENSE"
+            right={
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setAmount("");
+                  setNotes("");
+                  setError(null);
+                  setOkMsg(null);
+                }}
+                disabled={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Trash2 className="h-4 w-4" />
+                  Limpiar
+                </span>
+              </Button>
+            }
+          />
           <CardBody>
             <div className="grid gap-3 md:grid-cols-4 md:items-end">
               <Field label="Día (dateKey)">
-                <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
+                <Input
+                  type="date"
+                  value={dateKey}
+                  onChange={(e) => setDateKey(e.target.value)}
+                  disabled={busy}
+                />
               </Field>
 
               <Field label="Monto (ARS)">
-                <Input inputMode="decimal" placeholder="Ej: 4500" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                <Input
+                  inputMode="decimal"
+                  placeholder="Ej: 4500"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createExpense();
+                  }}
+                  disabled={busy}
+                />
+                <div className="mt-1 text-xs text-zinc-500">
+                  Preview:{" "}
+                  <span className="font-semibold">{moneyARS(parsedPreview)}</span>
+                </div>
               </Field>
 
               <Field label="Cuenta">
-                <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                <Select
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value)}
+                  disabled={busy || loadingBase}
+                >
                   <option value="">Seleccionar…</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -338,7 +456,11 @@ export default function CashierExpensesPage() {
               </Field>
 
               <Field label="Categoría">
-                <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                <Select
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                  disabled={busy || loadingBase}
+                >
                   <option value="">Sin categoría</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -350,7 +472,12 @@ export default function CashierExpensesPage() {
 
               <div className="md:col-span-4">
                 <Field label="Notas (opcional)">
-                  <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Proveedor / Compra insumos / Taxi…" />
+                  <Input
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Ej: Proveedor / Compra insumos / Taxi…"
+                    disabled={busy}
+                  />
                 </Field>
               </div>
             </div>
@@ -374,26 +501,48 @@ export default function CashierExpensesPage() {
               <Field label="Buscar">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                  <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Notas / cuenta / categoría…" />
+                  <Input
+                    className="pl-9"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Notas / cuenta / categoría…"
+                  />
                 </div>
               </Field>
 
-              <div className="text-sm text-zinc-500 md:text-right">{resp ? `${resp.total} items` : "—"}</div>
+              <div className="text-sm text-zinc-500 md:text-right">
+                {resp ? `${resp.total} items` : "—"}
+              </div>
             </div>
 
             <div className="mt-4 overflow-x-auto rounded-2xl border border-zinc-200 bg-white">
               <table className="min-w-full">
                 <thead className="bg-zinc-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Hora</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Cuenta</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Categoría</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Monto</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Notas</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Estado</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Acción</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Hora
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Cuenta
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Categoría
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Monto
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Notas
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Estado
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Acción
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-zinc-100">
                   {loading || !resp ? (
                     <tr>
@@ -414,6 +563,7 @@ export default function CashierExpensesPage() {
                         (r.accountId ? accountNameById.get(r.accountId) : null) ||
                         r.accountId ||
                         "—";
+
                       const cat =
                         r.categoryNameSnapshot ||
                         (r.categoryId ? categoryNameById.get(r.categoryId) : null) ||
@@ -421,13 +571,25 @@ export default function CashierExpensesPage() {
                         "Sin categoría";
 
                       const isVoid = r.status === "VOID";
+
                       return (
-                        <tr key={r.id} className={cn("hover:bg-zinc-50/60", isVoid && "opacity-60")}>
-                          <td className="px-4 py-3 text-sm text-zinc-700">{fmtTime(r.createdAt ?? null)}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{acc}</td>
+                        <tr
+                          key={r.id}
+                          className={cn("hover:bg-zinc-50/60", isVoid && "opacity-60")}
+                        >
+                          <td className="px-4 py-3 text-sm text-zinc-700">
+                            {fmtTime(r.createdAt ?? null)}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                            {acc}
+                          </td>
                           <td className="px-4 py-3 text-sm text-zinc-700">{cat}</td>
-                          <td className="px-4 py-3 text-right text-sm font-bold text-zinc-900">{moneyARS(r.amount)}</td>
-                          <td className="px-4 py-3 text-sm text-zinc-700">{r.notes?.trim() ? r.notes : "—"}</td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-zinc-900">
+                            {moneyARS(r.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-zinc-700">
+                            {r.notes?.trim() ? r.notes : "—"}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             {isVoid ? (
                               <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
@@ -442,7 +604,11 @@ export default function CashierExpensesPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Button variant="secondary" disabled={busy || isVoid} onClick={() => voidMovement(r.id)}>
+                            <Button
+                              variant="secondary"
+                              disabled={busy || isVoid}
+                              onClick={() => voidMovement(r.id)}
+                            >
                               Anular
                             </Button>
                           </td>
@@ -460,7 +626,11 @@ export default function CashierExpensesPage() {
                   Página {resp.page} · {resp.total} items
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="secondary" disabled={busy || page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  <Button
+                    variant="secondary"
+                    disabled={busy || page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
                     Anterior
                   </Button>
                   <Button

@@ -299,7 +299,7 @@ export default function AttendancePage() {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
               <Input
                 type="date"
                 value={dateKey}
@@ -313,7 +313,6 @@ export default function AttendancePage() {
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-                  Refrescar
                 </span>
               </Button>
             </div>
@@ -706,9 +705,6 @@ export default function AttendancePage() {
             <div className="text-sm text-zinc-500">
               Tip: activá “Pendientes” para ver quién falta check-out.
             </div>
-            <Button variant="secondary" onClick={refresh} disabled={busy || busyRefresh} loading={busyRefresh}>
-              Refrescar
-            </Button>
           </div>
         </div>
       </div>

@@ -342,7 +342,7 @@ export default function CashierIncomePage() {
             >
               <span className="inline-flex items-center gap-2">
                 <RefreshCcw className="h-4 w-4" />
-                Refrescar
+      
               </span>
             </Button>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Calculator,
+  Info,
 } from "lucide-react";
 
 // ============================================================================
@@ -48,19 +49,34 @@ function safeNumFromInput(s: string) {
 }
 
 function fmtInputFromNumber(n: number) {
-  // input amigable: sin símbolo, con coma decimal si hace falta
   const v = Number(n ?? 0) || 0;
-  // dos decimales, pero sin forzar .00 (más cómodo)
   const str = v.toFixed(2).replace(".", ",");
-  // recorta ,00
   return str.endsWith(",00") ? str.slice(0, -3) : str;
+}
+
+function formatDateTimeAR(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("es-AR");
+  } catch {
+    return String(iso);
+  }
+}
+
+function signColor(n: number) {
+  return n >= 0 ? "text-emerald-700" : "text-red-700";
+}
+
+function pillTone(n: number) {
+  return n >= 0
+    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+    : "border-red-200 bg-red-50 text-red-800";
 }
 
 // ============================================================================
 // Types
 // ============================================================================
 type FinanceAccountRow = { id: string; name: string; active?: boolean };
-
 type ClosingStatus = "OPEN" | "SUBMITTED" | "LOCKED";
 
 type ClosingBalanceRowDTO = {
@@ -82,11 +98,76 @@ type FinanceDayClosingDTO = {
   lockedAt: string | null;
 };
 
-// DTO upsert
 type UpsertDayClosingDto = {
   declaredBalances: Array<{ accountId: string; balance: number }>;
   notes?: string | null;
 };
+
+// ============================================================================
+// UI tiny components
+// ============================================================================
+function StatusChip({ status }: { status?: ClosingStatus | null }) {
+  if (!status) {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700">
+        <Info className="h-4 w-4" />
+        Sin cierre
+      </span>
+    );
+  }
+
+  const base = "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold";
+
+  if (status === "LOCKED") {
+    return (
+      <span className={cn(base, "border-zinc-300 bg-zinc-100 text-zinc-700")}>
+        <LockIcon className="h-4 w-4" />
+        LOCKED
+      </span>
+    );
+  }
+  if (status === "SUBMITTED") {
+    return (
+      <span className={cn(base, "border-emerald-200 bg-emerald-50 text-emerald-800")}>
+        <CheckCircle2 className="h-4 w-4" />
+        ENVIADO
+      </span>
+    );
+  }
+  return (
+    <span className={cn(base, "border-amber-200 bg-amber-50 text-amber-800")}>
+      <AlertTriangle className="h-4 w-4" />
+      BORRADOR
+    </span>
+  );
+}
+
+function StatCard({
+  title,
+  subtitle,
+  value,
+  tone = "default",
+}: {
+  title: string;
+  subtitle: string;
+  value: React.ReactNode;
+  tone?: "default" | "good" | "bad";
+}) {
+  const ring =
+    tone === "good"
+      ? "ring-1 ring-emerald-100"
+      : tone === "bad"
+      ? "ring-1 ring-red-100"
+      : "ring-1 ring-zinc-100";
+
+  return (
+    <div className={cn("rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm", ring)}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{title}</div>
+      <div className="mt-1 text-sm text-zinc-500">{subtitle}</div>
+      <div className="mt-3 text-2xl font-bold text-zinc-900">{value}</div>
+    </div>
+  );
+}
 
 // ============================================================================
 // Page
@@ -109,6 +190,15 @@ export default function CashierClosingPage() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
   const isLocked = closing?.status === "LOCKED";
+  const isSubmitted = closing?.status === "SUBMITTED";
+  const showComputed = isSubmitted || isLocked;
+
+  const okTimerRef = useRef<number | null>(null);
+  function flashOk(msg: string) {
+    setOkMsg(msg);
+    if (okTimerRef.current) window.clearTimeout(okTimerRef.current);
+    okTimerRef.current = window.setTimeout(() => setOkMsg(null), 2200);
+  }
 
   const accountNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -155,17 +245,22 @@ export default function CashierClosingPage() {
   // Loaders
   // ----------------------------------------------------------------------------
   async function loadAccounts() {
-    const acc = await apiFetchAuthed<FinanceAccountRow[]>(getAccessToken, "/finance/accounts?active=true");
+    const acc = await apiFetchAuthed<FinanceAccountRow[]>(
+      getAccessToken,
+      "/finance/accounts?active=true"
+    );
     setAccounts(acc || []);
     return acc || [];
   }
 
   async function loadClosing() {
     try {
-      const c = await apiFetchAuthed<FinanceDayClosingDTO>(getAccessToken, `/finance/closings/${encodeURIComponent(dateKey)}`);
+      const c = await apiFetchAuthed<FinanceDayClosingDTO>(
+        getAccessToken,
+        `/finance/closings/${encodeURIComponent(dateKey)}`
+      );
       setClosing(c);
 
-      // inicializar form desde closing
       const next: Record<string, string> = {};
       for (const r of c.declaredBalances || []) {
         if (r.accountId) next[r.accountId] = fmtInputFromNumber(r.balance);
@@ -173,11 +268,9 @@ export default function CashierClosingPage() {
       setDeclaredMap((prev) => ({ ...prev, ...next }));
       setNotes(c.notes ?? "");
     } catch (e: any) {
-      // si no existe cierre, no rompas: dejamos null y permitimos crear con POST
       const msg = String(e?.message || "");
       if (msg.toLowerCase().includes("404") || msg.toLowerCase().includes("no encontrado")) {
         setClosing(null);
-        // no tocamos declaredMap para que puedas empezar a cargar
       } else {
         throw e;
       }
@@ -191,7 +284,6 @@ export default function CashierClosingPage() {
     try {
       const acc = await loadAccounts();
 
-      // si todavía no había declaredMap, prellenar con 0 vacío para cada cuenta (solo UI)
       setDeclaredMap((prev) => {
         const next = { ...prev };
         for (const a of acc) {
@@ -214,7 +306,6 @@ export default function CashierClosingPage() {
   }, []);
 
   useEffect(() => {
-    // al cambiar dateKey, recargar cierre y mantener cuentas
     (async () => {
       setError(null);
       setOkMsg(null);
@@ -238,14 +329,10 @@ export default function CashierClosingPage() {
     setError(null);
     setOkMsg(null);
 
-    const declaredBalances = accounts
-      .map((a) => ({
-        accountId: a.id,
-        balance: safeNumFromInput(declaredMap[a.id] ?? ""),
-      }))
-      // si querés permitir “no declarar” una cuenta, filtrá vacíos:
-      // .filter((r) => (declaredMap[r.accountId] ?? "").trim() !== "")
-      ;
+    const declaredBalances = accounts.map((a) => ({
+      accountId: a.id,
+      balance: safeNumFromInput(declaredMap[a.id] ?? ""),
+    }));
 
     const dto: UpsertDayClosingDto = {
       declaredBalances,
@@ -260,8 +347,7 @@ export default function CashierClosingPage() {
         { method: "POST", body: JSON.stringify(dto) }
       );
       setClosing(res);
-      setOkMsg("Borrador guardado ✔");
-      window.setTimeout(() => setOkMsg(null), 2500);
+      flashOk("Borrador guardado");
     } catch (e: any) {
       setError(e?.message || "Error guardando borrador");
     } finally {
@@ -270,13 +356,12 @@ export default function CashierClosingPage() {
   }
 
   async function submitClosing() {
-    if (!confirm("¿Enviar cierre? Esto recalcula y marca SUBMITTED.")) return;
+    if (!confirm("¿Enviar cierre? Esto recalcula y marca ENVIADO.")) return;
 
     setBusy(true);
     setError(null);
     setOkMsg(null);
     try {
-      // primero guardamos el draft para asegurar declared actual
       await saveDraft();
 
       const res = await apiFetchAuthed<FinanceDayClosingDTO>(
@@ -285,8 +370,7 @@ export default function CashierClosingPage() {
         { method: "POST" }
       );
       setClosing(res);
-      setOkMsg("Cierre enviado ✔ (SUBMITTED)");
-      window.setTimeout(() => setOkMsg(null), 2500);
+      flashOk("Cierre enviado (ENVIADO)");
     } catch (e: any) {
       setError(e?.message || "Error enviando cierre");
     } finally {
@@ -306,8 +390,7 @@ export default function CashierClosingPage() {
         { method: "POST" }
       );
       setClosing(res);
-      setOkMsg("Cierre LOCKED ✔");
-      window.setTimeout(() => setOkMsg(null), 2500);
+      flashOk("Cierre bloqueado (LOCKED)");
     } catch (e: any) {
       setError(e?.message || "Error lockeando cierre");
     } finally {
@@ -315,16 +398,26 @@ export default function CashierClosingPage() {
     }
   }
 
+  function onBlurFormatAccount(id: string) {
+    setDeclaredMap((prev) => {
+      const raw = prev[id] ?? "";
+      if (!raw.trim()) return prev;
+      const n = safeNumFromInput(raw);
+      return { ...prev, [id]: fmtInputFromNumber(n) };
+    });
+  }
+
   // ----------------------------------------------------------------------------
   // UI
   // ----------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-zinc-50">
-      <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur">
+      {/* Top bar (Gourmetify-ish) */}
+      <div className="sticky top-0 z-20 border-b border-zinc-200 bg-white/85 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
                   onClick={() => (window.location.href = "/cashier")}
@@ -334,49 +427,44 @@ export default function CashierClosingPage() {
                   Volver
                 </button>
 
-                <h1 className="text-2xl font-bold text-zinc-900">Cashier • Cierre del día</h1>
+                <div className="min-w-0">
+                  <h1 className="truncate text-xl font-bold text-zinc-900 md:text-2xl">
+                    Cierre del día
+                  </h1>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+                    <span className="font-medium text-zinc-700">{dateKey}</span>
+                    <span>•</span>
+                    <span>
+                      Enviado: {formatDateTimeAR(closing?.submittedAt)}
+                      {closing?.lockedAt ? ` · Lock: ${formatDateTimeAR(closing.lockedAt)}` : ""}
+                    </span>
+                  </div>
+                </div>
 
-                {closing?.status ? (
-                  <span
-                    className={cn(
-                      "ml-2 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold",
-                      closing.status === "LOCKED"
-                        ? "border-zinc-300 bg-zinc-100 text-zinc-700"
-                        : closing.status === "SUBMITTED"
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-amber-200 bg-amber-50 text-amber-800"
-                    )}
-                  >
-                    {closing.status === "LOCKED" ? (
-                      <>
-                        <LockIcon className="h-4 w-4" />
-                        LOCKED
-                      </>
-                    ) : closing.status === "SUBMITTED" ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4" />
-                        SUBMITTED
-                      </>
-                    ) : (
-                      <>
-                        <AlertTriangle className="h-4 w-4" />
-                        OPEN
-                      </>
-                    )}
-                  </span>
-                ) : (
-                  <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
-                    Sin cierre (se crea al guardar)
-                  </span>
-                )}
+                <StatusChip status={closing?.status} />
               </div>
 
-              <p className="mt-1 text-sm text-zinc-500">
-                Declarás saldos por cuenta. Al enviar, el sistema recalcula y muestra diferencias.
+              <p className="mt-2 text-sm text-zinc-500">
+                Cargá saldos por cuenta. Al enviar, el sistema recalcula y te muestra diferencias.
               </p>
+
+              {(error || okMsg) && (
+                <div className="mt-3 grid gap-2">
+                  {error && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {error}
+                    </div>
+                  )}
+                  {okMsg && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {okMsg}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="flex items-end gap-2">
+            <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
                 onClick={async () => {
@@ -392,77 +480,61 @@ export default function CashierClosingPage() {
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-                  Refrescar
+              
                 </span>
               </Button>
             </div>
           </div>
-
-          {(error || okMsg) && (
-            <div className="mt-3 grid gap-2">
-              {error && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
-              {okMsg && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  {okMsg}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
-      <div className="mx-auto max-w-5xl px-4 py-6 space-y-6">
-        {/* Filters */}
+      <div className="mx-auto max-w-5xl px-4 py-6 pb-28 space-y-6">
+        {/* Fecha */}
         <Card>
-          <CardHeader title="Fecha de cierre" subtitle="dateKey en Argentina" />
+          <CardHeader title="Fecha" subtitle="Se usa dateKey (Argentina)" />
           <CardBody>
-            <div className="grid gap-3 md:grid-cols-[220px_1fr] md:items-end">
-              <Field label="Día (dateKey)">
-                <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
+            <div className="grid gap-3 md:grid-cols-[240px_1fr] md:items-end">
+              <Field label="Día">
+                <Input
+                  type="date"
+                  value={dateKey}
+                  onChange={(e) => setDateKey(e.target.value)}
+                  disabled={busy}
+                />
               </Field>
 
-              <div className="text-sm text-zinc-500">
-                {closing?.submittedAt ? `Enviado: ${new Date(closing.submittedAt).toLocaleString("es-AR")}` : "—"}
-                {closing?.lockedAt ? ` · LOCK: ${new Date(closing.lockedAt).toLocaleString("es-AR")}` : ""}
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-zinc-800">Tip:</span>
+                  <span>Si querés ver “computado” y “diff”, primero enviá el cierre.</span>
+                </div>
               </div>
             </div>
           </CardBody>
         </Card>
 
-        {/* Summary totals */}
+        {/* Resumen */}
         <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader title="Total declarado" subtitle="Suma inputs" />
-            <CardBody>
-              <div className="text-2xl font-bold text-zinc-900">{moneyARS(declaredTotal)}</div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="Total computado" subtitle="Desde movimientos" />
-            <CardBody>
-              <div className="text-2xl font-bold text-zinc-900">{moneyARS(computedTotal)}</div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="Diferencia total" subtitle="Declarado - Computado" />
-            <CardBody>
-              <div className={cn("text-2xl font-bold", diffTotal >= 0 ? "text-emerald-700" : "text-red-700")}>
-                {moneyARS(diffTotal)}
-              </div>
-            </CardBody>
-          </Card>
+          <StatCard title="Declarado" subtitle="Suma de tus inputs" value={moneyARS(declaredTotal)} />
+          <StatCard
+            title="Computado"
+            subtitle={showComputed ? "Desde movimientos" : "Disponible al enviar"}
+            value={showComputed ? moneyARS(computedTotal) : "—"}
+          />
+          <StatCard
+            title="Diferencia"
+            subtitle="Declarado - Computado"
+            tone={showComputed ? (diffTotal >= 0 ? "good" : "bad") : "default"}
+            value={
+              showComputed ? <span className={cn(signColor(diffTotal))}>{moneyARS(diffTotal)}</span> : "—"
+            }
+          />
         </div>
 
-        {/* Declared balances */}
+        {/* Inputs por cuenta */}
         <Card>
           <CardHeader
-            title="Saldos declarados por cuenta"
+            title="Saldos por cuenta"
             subtitle={isLocked ? "LOCKED: solo lectura" : "Cargá los saldos reales al cierre"}
           />
           <CardBody>
@@ -476,17 +548,20 @@ export default function CashierClosingPage() {
                   const declaredStr = declaredMap[a.id] ?? "";
                   const declaredVal = safeNumFromInput(declaredStr);
 
-                  const computedVal = computedById.get(a.id);
-                  const diffVal = diffById.get(a.id);
-
-                  const showComputed = closing?.status === "SUBMITTED" || closing?.status === "LOCKED";
+                  const computedVal = computedById.get(a.id) ?? 0;
+                  const diffVal = showComputed
+                    ? (diffById.get(a.id) ?? 0)
+                    : declaredVal - computedVal;
 
                   return (
-                    <div key={a.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="flex flex-wrap items-end justify-between gap-3">
-                        <div>
+                    <div
+                      key={a.id}
+                      className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                        <div className="min-w-0">
                           <div className="text-sm font-semibold text-zinc-900">{a.name}</div>
-                          <div className="text-xs text-zinc-500">{a.id}</div>
+                          <div className="mt-0.5 text-xs text-zinc-500">{a.id}</div>
                         </div>
 
                         <div className="grid gap-3 md:grid-cols-3 md:items-end">
@@ -497,32 +572,38 @@ export default function CashierClosingPage() {
                               onChange={(e) =>
                                 setDeclaredMap((prev) => ({ ...prev, [a.id]: e.target.value }))
                               }
+                              onFocus={(e) => e.currentTarget.select()}
+                              onBlur={() => onBlurFormatAccount(a.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveDraft();
+                              }}
                               placeholder="Ej: 120000"
                               disabled={busy || isLocked}
+                              className="text-right"
                             />
                           </Field>
 
-                          <div className="text-sm">
-                            <div className="text-xs text-zinc-500 inline-flex items-center gap-2">
+                          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                            <div className="text-xs font-semibold text-zinc-500 inline-flex items-center gap-2">
                               <Calculator className="h-4 w-4" />
                               Computado
                             </div>
-                            <div className="mt-1 font-semibold text-zinc-900">
-                              {showComputed ? moneyARS(computedVal ?? 0) : "—"}
+                            <div className="mt-1 text-sm font-bold text-zinc-900">
+                              {showComputed ? moneyARS(computedVal) : "—"}
                             </div>
                           </div>
 
-                          <div className="text-sm">
-                            <div className="text-xs text-zinc-500">Diff (decl - comp)</div>
-                            <div
-                              className={cn(
-                                "mt-1 font-bold",
-                                (diffVal ?? (declaredVal - (computedVal ?? 0))) >= 0
-                                  ? "text-emerald-700"
-                                  : "text-red-700"
-                              )}
-                            >
-                              {showComputed ? moneyARS(diffVal ?? 0) : "—"}
+                          <div
+                            className={cn(
+                              "rounded-xl border px-3 py-2",
+                              showComputed ? pillTone(diffVal) : "border-zinc-200 bg-white text-zinc-700"
+                            )}
+                          >
+                            <div className="text-xs font-semibold text-zinc-500">
+                              Diff (decl - comp)
+                            </div>
+                            <div className={cn("mt-1 text-sm font-extrabold", showComputed && signColor(diffVal))}>
+                              {showComputed ? moneyARS(diffVal) : "—"}
                             </div>
                           </div>
                         </div>
@@ -533,7 +614,7 @@ export default function CashierClosingPage() {
               </div>
             )}
 
-            <div className="mt-4">
+            <div className="mt-5">
               <Field label="Notas (opcional)">
                 <Input
                   value={notes}
@@ -544,42 +625,29 @@ export default function CashierClosingPage() {
               </Field>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button onClick={saveDraft} disabled={busy || loading || isLocked} loading={busy}>
-                <span className="inline-flex items-center gap-2">
-                  <Save className="h-4 w-4" />
-                  Guardar borrador
-                </span>
-              </Button>
-
-              <Button variant="secondary" onClick={submitClosing} disabled={busy || loading || isLocked} loading={busy}>
-                <span className="inline-flex items-center gap-2">
-                  <Send className="h-4 w-4" />
-                  Enviar cierre
-                </span>
-              </Button>
-
-              {/* Si querés que lock sea solo admin y no se muestre en cashier, borrá este botón */}
-              <Button variant="danger" onClick={lockClosing} disabled={busy || loading || closing?.status !== "SUBMITTED"} loading={busy}>
-                <span className="inline-flex items-center gap-2">
-                  <LockIcon className="h-4 w-4" />
-                  Lock (ADMIN)
-                </span>
-              </Button>
-            </div>
-
-            <p className="mt-3 text-xs text-zinc-500">
-              * Submit recalcula computed/diff en backend y marca SUBMITTED. Lock solo ADMIN.
-            </p>
+            {!showComputed && (
+              <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
+                <div className="flex items-start gap-2">
+                  <Info className="mt-0.5 h-4 w-4" />
+                  <div>
+                    <div className="font-semibold text-zinc-800">Consejo</div>
+                    <div>
+                      Guardá borrador durante el día. Cuando termines, <b>Enviar cierre</b> para ver el
+                      computado y las diferencias.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </CardBody>
         </Card>
 
-        {/* If submitted/locked, show computed table */}
-        {(closing?.status === "SUBMITTED" || closing?.status === "LOCKED") && (
+        {/* Tablas extra (solo enviado/locked) */}
+        {showComputed && (
           <div className="grid gap-4 md:grid-cols-2">
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <div className="border-b border-zinc-100 px-5 py-4">
-                <h2 className="text-lg font-semibold text-zinc-900">Computed (sistema)</h2>
+                <h2 className="text-lg font-semibold text-zinc-900">Computado (sistema)</h2>
                 <p className="mt-1 text-sm text-zinc-500">Saldo final por cuenta hasta {dateKey}.</p>
               </div>
 
@@ -602,7 +670,9 @@ export default function CashierClosingPage() {
                       return (
                         <tr key={`${id}-${idx}`} className="hover:bg-zinc-50/60">
                           <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{name}</td>
-                          <td className="px-4 py-3 text-right text-sm font-bold text-zinc-900">{moneyARS(r.balance)}</td>
+                          <td className="px-4 py-3 text-right text-sm font-extrabold text-zinc-900">
+                            {moneyARS(r.balance)}
+                          </td>
                         </tr>
                       );
                     })}
@@ -620,8 +690,8 @@ export default function CashierClosingPage() {
 
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <div className="border-b border-zinc-100 px-5 py-4">
-                <h2 className="text-lg font-semibold text-zinc-900">Diffs (decl - comp)</h2>
-                <p className="mt-1 text-sm text-zinc-500">Solo para cuentas declaradas.</p>
+                <h2 className="text-lg font-semibold text-zinc-900">Diferencias</h2>
+                <p className="mt-1 text-sm text-zinc-500">Declarado - Computado.</p>
               </div>
 
               <div className="overflow-x-auto">
@@ -644,13 +714,15 @@ export default function CashierClosingPage() {
                       return (
                         <tr key={`${id}-${idx}`} className="hover:bg-zinc-50/60">
                           <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{name}</td>
-                          <td
-                            className={cn(
-                              "px-4 py-3 text-right text-sm font-bold",
-                              val >= 0 ? "text-emerald-700" : "text-red-700"
-                            )}
-                          >
-                            {moneyARS(val)}
+                          <td className="px-4 py-3 text-right">
+                            <span
+                              className={cn(
+                                "inline-flex min-w-[120px] justify-end rounded-full border px-3 py-1 text-sm font-extrabold",
+                                pillTone(val)
+                              )}
+                            >
+                              {moneyARS(val)}
+                            </span>
                           </td>
                         </tr>
                       );
@@ -658,7 +730,7 @@ export default function CashierClosingPage() {
                     {(closing?.diffBalances || []).length === 0 && (
                       <tr>
                         <td colSpan={2} className="px-4 py-6 text-sm text-zinc-500">
-                          No hay diffs (todavía).
+                          No hay diffs.
                         </td>
                       </tr>
                     )}
@@ -668,6 +740,59 @@ export default function CashierClosingPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Sticky action bar (muy Gourmetify) */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto max-w-5xl px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-zinc-600">
+              <span className="font-semibold text-zinc-900">{moneyARS(declaredTotal)}</span>{" "}
+              <span className="text-zinc-400">·</span>{" "}
+              <span className={cn("font-semibold", showComputed ? signColor(diffTotal) : "text-zinc-600")}>
+                {showComputed ? `Diff: ${moneyARS(diffTotal)}` : "Diff: —"}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={saveDraft} disabled={busy || loading || isLocked} loading={busy}>
+                <span className="inline-flex items-center gap-2">
+                  <Save className="h-4 w-4" />
+                  Guardar
+                </span>
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={submitClosing}
+                disabled={busy || loading || isLocked}
+                loading={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Send className="h-4 w-4" />
+                  Enviar
+                </span>
+              </Button>
+
+              {/* Si querés que lock no aparezca en cashier: borrá este botón */}
+              <Button
+                variant="danger"
+                onClick={lockClosing}
+                disabled={busy || loading || closing?.status !== "SUBMITTED"}
+                loading={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <LockIcon className="h-4 w-4" />
+                  Lock
+                </span>
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-1 text-xs text-zinc-500">
+            * Enviar recalcula en backend. Lock solo ADMIN.
+          </div>
+        </div>
       </div>
     </div>
   );

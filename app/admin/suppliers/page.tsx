@@ -42,6 +42,34 @@ function StatusPill({ active }: { active: boolean }) {
   );
 }
 
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "error" | "ok";
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-3 py-2 text-sm",
+        tone === "error"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      )}
+    >
+      <span className="inline-flex items-center gap-2">
+        {tone === "error" ? (
+          <AlertTriangle className="h-4 w-4" />
+        ) : (
+          <CheckCircle2 className="h-4 w-4" />
+        )}
+        {children}
+      </span>
+    </div>
+  );
+}
+
 export default function AdminSuppliersPage() {
   const { getAccessToken } = useAuth();
 
@@ -52,10 +80,10 @@ export default function AdminSuppliersPage() {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
-  // Crear
+  // create
   const [name, setName] = useState("");
 
-  // Buscar
+  // search
   const [q, setQ] = useState("");
 
   const filtered = useMemo(() => {
@@ -67,13 +95,12 @@ export default function AdminSuppliersPage() {
   const totals = useMemo(() => {
     const total = items.length;
     const active = items.filter((s) => s.isActive).length;
-    const inactive = total - active;
-    return { total, active, inactive };
+    return { total, active, inactive: total - active };
   }, [items]);
 
   function flashOk(msg: string) {
     setOk(msg);
-    window.setTimeout(() => setOk(null), 1500);
+    window.setTimeout(() => setOk(null), 1600);
   }
 
   async function load() {
@@ -81,7 +108,10 @@ export default function AdminSuppliersPage() {
     setOk(null);
     setLoading(true);
     try {
-      const data = await apiFetchAuthed<Supplier[]>(getAccessToken, "/suppliers");
+      const data = await apiFetchAuthed<Supplier[]>(
+        getAccessToken,
+        "/suppliers"
+      );
       setItems(data);
       flashOk("Datos actualizados ✔");
     } catch (e: any) {
@@ -145,190 +175,186 @@ export default function AdminSuppliersPage() {
 
   return (
     <AdminProtected>
-      <div className="min-h-screen bg-zinc-50">
-        <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
-          {/* Sticky header */}
-          <div className="sticky top-0 z-10 -mx-4 border-b border-zinc-200 bg-white/80 px-4 py-4 backdrop-blur">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h1 className="text-2xl font-bold text-zinc-900">
-                  Admin • Proveedores
-                </h1>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Creá y activá/desactivá proveedores.
-                </p>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+                Proveedores
+              </h1>
+              <p className="mt-1 text-sm text-zinc-500">
+                Creá y activá/desactivá proveedores para compras y conteos.
+              </p>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                    Total: {totals.total}
-                  </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                    Activos: {totals.active}
-                  </span>
-                  <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                    Inactivos: {totals.inactive}
-                  </span>
-                </div>
+              <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                <span className="text-zinc-700">
+                  Total: <b>{totals.total}</b>
+                </span>
+                <span className="text-emerald-700">
+                  Activos: <b>{totals.active}</b>
+                </span>
+                <span className="text-zinc-600">
+                  Inactivos: <b>{totals.inactive}</b>
+                </span>
               </div>
+            </div>
 
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={load}
+                loading={loading}
+                disabled={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                </span>
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Notices */}
+        {(err || ok) && (
+          <div className="grid gap-2">
+            {err && <Notice tone="error">{err}</Notice>}
+            {!err && ok && <Notice tone="ok">{ok}</Notice>}
+          </div>
+        )}
+
+        {/* Toolbar (Search) */}
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar proveedor…"
+                className="pl-9"
+              />
+            </div>
+
+            <div className="text-sm text-zinc-500">
+              {q.trim()
+                ? `${filtered.length} de ${items.length}`
+                : `${items.length} proveedor(es)`}
+            </div>
+          </div>
+        </div>
+
+        {/* Create */}
+        <Card>
+          <CardHeader title="Crear proveedor" subtitle="Nombre único" />
+          <CardBody>
+            <div className="grid gap-3 md:grid-cols-[1fr_160px]">
+              <Field label="Nombre">
+                <div className="relative">
+                  <Truck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ej: Proveedor A"
+                    className="pl-9"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") create();
+                    }}
+                  />
+                </div>
+              </Field>
+
+              <div className="flex items-end">
                 <Button
-                  variant="secondary"
-                  onClick={load}
-                  loading={loading}
-                  disabled={busy}
+                  className="w-full"
+                  onClick={create}
+                  loading={busy}
+                  disabled={busy || !name.trim()}
                 >
                   <span className="inline-flex items-center gap-2">
-                    <RefreshCcw className="h-4 w-4" />
-                    Refrescar
+                    <Plus className="h-4 w-4" />
+                    Crear
                   </span>
                 </Button>
               </div>
             </div>
+          </CardBody>
+        </Card>
 
-            {/* Search */}
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Buscar proveedor…"
-                  className="pl-9"
-                />
-              </div>
-
-              <div className="text-sm text-zinc-500">
-                {q.trim() ? `${filtered.length} de ${items.length}` : `${items.length} proveedor(es)`}
-              </div>
-            </div>
-
-            {(err || ok) && (
-              <div className="mt-3 grid gap-2">
-                {err && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    <span className="inline-flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4" />
-                      {err}
-                    </span>
-                  </div>
-                )}
-                {ok && !err && (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    <span className="inline-flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4" />
-                      {ok}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
+        {/* List */}
+        <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+          <div className="border-b border-zinc-100 px-5 py-4">
+            <h2 className="text-lg font-semibold text-zinc-900">Listado</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Los proveedores inactivos no aparecen en conteos ni selecciones.
+            </p>
           </div>
 
-          {/* Crear */}
-          <Card>
-            <CardHeader title="Crear proveedor" subtitle="Nombre único" />
-            <CardBody>
-              <div className="grid gap-3 md:grid-cols-[1fr_160px]">
-                <Field label="Nombre">
-                  <div className="relative">
-                    <Truck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Ej: Proveedor A"
-                      className="pl-9"
-                    />
-                  </div>
-                </Field>
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Nombre
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Estado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
 
-                <div className="flex items-end">
-                  <Button
-                    className="w-full"
-                    onClick={create}
-                    loading={busy}
-                    disabled={busy || !name.trim()}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Plus className="h-4 w-4" />
-                      Crear
-                    </span>
-                  </Button>
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          {/* Listado */}
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <div className="border-b border-zinc-100 px-5 py-4">
-              <h2 className="text-lg font-semibold text-zinc-900">Listado</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Activá/desactivá proveedores. Los inactivos no aparecen para conteo.
-              </p>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50">
+              <tbody className="divide-y divide-zinc-100">
+                {loading && (
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Nombre
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Estado
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Acciones
-                    </th>
+                    <td colSpan={3} className="px-4 py-6 text-sm text-zinc-500">
+                      Cargando…
+                    </td>
                   </tr>
-                </thead>
+                )}
 
-                <tbody className="divide-y divide-zinc-100">
-                  {loading && (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-6 text-sm text-zinc-500">
-                        Cargando…
+                {!loading && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-8 text-sm text-zinc-500">
+                      No hay proveedores.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  filtered.map((s) => (
+                    <tr key={s.id} className="hover:bg-zinc-50 transition">
+                      <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                        {s.name}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <StatusPill active={s.isActive} />
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <Button
+                          variant={s.isActive ? "danger" : "secondary"}
+                          disabled={busy}
+                          onClick={() => toggleActive(s)}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Power className="h-4 w-4" />
+                            {s.isActive ? "Desactivar" : "Reactivar"}
+                          </span>
+                        </Button>
                       </td>
                     </tr>
-                  )}
+                  ))}
+              </tbody>
+            </table>
+          </div>
 
-                  {!loading && filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-6 text-sm text-zinc-500">
-                        No hay proveedores.
-                      </td>
-                    </tr>
-                  )}
-
-                  {!loading &&
-                    filtered.map((s) => (
-                      <tr key={s.id} className="hover:bg-zinc-50/60">
-                        <td className="px-4 py-3 text-sm font-medium text-zinc-900">
-                          {s.name}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <StatusPill active={s.isActive} />
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <Button
-                            variant={s.isActive ? "danger" : "secondary"}
-                            disabled={busy}
-                            onClick={() => toggleActive(s)}
-                          >
-                            <span className="inline-flex items-center gap-2">
-                              <Power className="h-4 w-4" />
-                              {s.isActive ? "Desactivar" : "Reactivar"}
-                            </span>
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
+          <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
+            Tip: después le metemos “Orden / Alias / CUIT / Contacto” si querés
+            y queda pro para compras.
           </div>
         </div>
       </div>

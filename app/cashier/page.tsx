@@ -21,6 +21,7 @@ import {
   ArrowDownUp,
   LogOut,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 // ============================================================================
 // Helpers
@@ -87,7 +88,12 @@ function cn(...classes: Array<string | false | null | undefined>) {
 // Types (User / Me)
 // ============================================================================
 type MeResponse = {
-  employee: { id: string; fullName: string; hourlyRate: number; isActive: boolean };
+  employee: {
+    id: string;
+    fullName: string;
+    hourlyRate: number;
+    isActive: boolean;
+  };
 };
 
 type SummaryResponse = {
@@ -194,7 +200,7 @@ type FinanceMovementsResponse = {
 // ============================================================================
 export default function CashierPanelPage() {
   const { getAccessToken, logout } = useAuth();
-
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"work" | "finance">("work");
 
   // -------------------------
@@ -269,13 +275,17 @@ export default function CashierPanelPage() {
 
       const sum = await apiFetchAuthed<SummaryResponse>(
         getAccessToken,
-        `/me/attendance/summary?from=${encodeURIComponent(week.from)}&to=${encodeURIComponent(week.to)}`
+        `/me/attendance/summary?from=${encodeURIComponent(
+          week.from
+        )}&to=${encodeURIComponent(week.to)}`
       );
       setSummary(sum);
 
       const p = await apiFetchAuthed<ProductionRow[]>(
         getAccessToken,
-        `/me/production?from=${encodeURIComponent(week.from)}&to=${encodeURIComponent(week.to)}&limit=200`
+        `/me/production?from=${encodeURIComponent(
+          week.from
+        )}&to=${encodeURIComponent(week.to)}&limit=200`
       );
       setProd(p);
     } catch (e: any) {
@@ -289,20 +299,32 @@ export default function CashierPanelPage() {
     setError(null);
     try {
       // Stats del día
-      const s = await apiFetchAuthed<FinanceStatsResponse>(getAccessToken, buildDayStatsUrl());
+      const s = await apiFetchAuthed<FinanceStatsResponse>(
+        getAccessToken,
+        buildDayStatsUrl()
+      );
       setStats(s);
 
       // Cat + cuentas
       const [acc, cats] = await Promise.all([
-        apiFetchAuthed<FinanceAccountRow[]>(getAccessToken, "/finance/accounts?active=true"),
-        apiFetchAuthed<FinanceCategoryRow[]>(getAccessToken, "/finance/categories?active=true"),
+        apiFetchAuthed<FinanceAccountRow[]>(
+          getAccessToken,
+          "/finance/accounts?active=true"
+        ),
+        apiFetchAuthed<FinanceCategoryRow[]>(
+          getAccessToken,
+          "/finance/categories?active=true"
+        ),
       ]);
       setAccounts(acc);
       setCategories(cats);
 
       // Movements del día
       setMovLoading(true);
-      const m = await apiFetchAuthed<FinanceMovementsResponse>(getAccessToken, buildDayMovementsUrl());
+      const m = await apiFetchAuthed<FinanceMovementsResponse>(
+        getAccessToken,
+        buildDayMovementsUrl()
+      );
       setMovs(m);
     } catch (e: any) {
       setError(e?.message || "Error cargando finanzas (día)");
@@ -340,13 +362,17 @@ export default function CashierPanelPage() {
       try {
         const sum = await apiFetchAuthed<SummaryResponse>(
           getAccessToken,
-          `/me/attendance/summary?from=${encodeURIComponent(week.from)}&to=${encodeURIComponent(week.to)}`
+          `/me/attendance/summary?from=${encodeURIComponent(
+            week.from
+          )}&to=${encodeURIComponent(week.to)}`
         );
         setSummary(sum);
 
         const p = await apiFetchAuthed<ProductionRow[]>(
           getAccessToken,
-          `/me/production?from=${encodeURIComponent(week.from)}&to=${encodeURIComponent(week.to)}&limit=200`
+          `/me/production?from=${encodeURIComponent(
+            week.from
+          )}&to=${encodeURIComponent(week.to)}&limit=200`
         );
         setProd(p);
       } catch (e: any) {
@@ -421,7 +447,9 @@ export default function CashierPanelPage() {
     setError(null);
     setOkMsg(null);
     try {
-      await apiFetchAuthed(getAccessToken, `/finance/movements/${id}/void`, { method: "POST" });
+      await apiFetchAuthed(getAccessToken, `/finance/movements/${id}/void`, {
+        method: "POST",
+      });
       await loadFinance();
       setOkMsg("Movimiento anulado ✔");
       window.setTimeout(() => setOkMsg(null), 2500);
@@ -461,7 +489,9 @@ export default function CashierPanelPage() {
     return prodByDay
       .map(([dk, rows]) => {
         const filtered = rows.filter((r) => {
-          const hay = `${r.taskName ?? ""} ${r.taskId ?? ""} ${r.notes ?? ""}`.toLowerCase();
+          const hay = `${r.taskName ?? ""} ${r.taskId ?? ""} ${
+            r.notes ?? ""
+          }`.toLowerCase();
           return hay.includes(q);
         });
         return [dk, filtered] as const;
@@ -517,7 +547,9 @@ export default function CashierPanelPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-bold text-zinc-900">Cashier • Panel</h1>
+                <h1 className="text-2xl font-bold text-zinc-900">
+                  Cashier • Panel
+                </h1>
 
                 {!loading && (
                   <span
@@ -555,14 +587,21 @@ export default function CashierPanelPage() {
                 </span>
               </div>
 
-              <p className="mt-1 text-sm text-zinc-500">Mis horas y tareas + finanzas del día.</p>
+              <p className="mt-1 text-sm text-zinc-500">
+                Mis horas y tareas + finanzas del día.
+              </p>
             </div>
 
             <div className="flex items-end gap-2">
-              <Button variant="secondary" onClick={refreshAll} disabled={busy || busyRefresh} loading={busyRefresh}>
+              <Button
+                variant="secondary"
+                onClick={refreshAll}
+                disabled={busy || busyRefresh}
+                loading={busyRefresh}
+              >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-                  Refrescar
+    
                 </span>
               </Button>
 
@@ -573,7 +612,7 @@ export default function CashierPanelPage() {
                   try {
                     await logout();
                   } finally {
-                    setBusy(false);
+                    router.replace("/login");
                   }
                 }}
                 disabled={busy || busyRefresh}
@@ -594,7 +633,9 @@ export default function CashierPanelPage() {
               onClick={() => setActiveTab("work")}
               className={cn(
                 "h-10 rounded-xl border px-3 text-sm font-semibold transition",
-                activeTab === "work" ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+                activeTab === "work"
+                  ? "border-zinc-900 bg-zinc-900 text-white"
+                  : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
               )}
             >
               Mi trabajo
@@ -617,7 +658,9 @@ export default function CashierPanelPage() {
           {(error || okMsg) && (
             <div className="mt-3 grid gap-2">
               {error && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {error}
+                </div>
               )}
               {okMsg && (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -637,47 +680,80 @@ export default function CashierPanelPage() {
           <>
             {/* Hoy */}
             <Card>
-              <CardHeader title={`Hoy (${dateKey})`} subtitle={me ? `Empleado: ${me.employee.fullName}` : "Cargando empleado…"} />
+              <CardHeader
+                title={`Hoy (${dateKey})`}
+                subtitle={
+                  me
+                    ? `Empleado: ${me.employee.fullName}`
+                    : "Cargando empleado…"
+                }
+              />
               <CardBody>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Entrada</div>
-                    <div className="mt-1 text-lg font-semibold text-zinc-900">{fmtTime(todayRow?.checkInAt ?? null)}</div>
+                    <div className="mt-1 text-lg font-semibold text-zinc-900">
+                      {fmtTime(todayRow?.checkInAt ?? null)}
+                    </div>
                   </div>
 
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Salida</div>
-                    <div className="mt-1 text-lg font-semibold text-zinc-900">{fmtTime(todayRow?.checkOutAt ?? null)}</div>
+                    <div className="mt-1 text-lg font-semibold text-zinc-900">
+                      {fmtTime(todayRow?.checkOutAt ?? null)}
+                    </div>
                   </div>
 
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Horas hoy</div>
-                    <div className="mt-1 text-lg font-semibold text-zinc-900">{todayRow ? `${todayRow.hours} h` : "—"}</div>
+                    <div className="mt-1 text-lg font-semibold text-zinc-900">
+                      {todayRow ? `${todayRow.hours} h` : "—"}
+                    </div>
                   </div>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button onClick={checkIn} disabled={busy || !!todayRow?.checkInAt} loading={busy}>
+                  <Button
+                    onClick={checkIn}
+                    disabled={busy || !!todayRow?.checkInAt}
+                    loading={busy}
+                  >
                     Marcar Entrada
                   </Button>
 
-                  <Button variant="secondary" onClick={checkOut} disabled={busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt} loading={busy}>
+                  <Button
+                    variant="secondary"
+                    onClick={checkOut}
+                    disabled={
+                      busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt
+                    }
+                    loading={busy}
+                  >
                     Marcar Salida
                   </Button>
 
                   <Field label="Día">
-                    <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
+                    <Input
+                      type="date"
+                      value={dateKey}
+                      onChange={(e) => setDateKey(e.target.value)}
+                    />
                   </Field>
                 </div>
 
-                <p className="mt-3 text-xs text-zinc-500">*Esto es EXACTAMENTE el panel USER (horas + tareas).</p>
+                <p className="mt-3 text-xs text-zinc-500">
+                  *Esto es EXACTAMENTE el panel USER (horas + tareas).
+                </p>
               </CardBody>
             </Card>
 
             {/* Semana */}
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
-                <CardHeader title="Semana actual" subtitle={`${week.from} → ${week.to}`} />
+                <CardHeader
+                  title="Semana actual"
+                  subtitle={`${week.from} → ${week.to}`}
+                />
                 <CardBody>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -685,7 +761,9 @@ export default function CashierPanelPage() {
                         <TrendingUp className="h-4 w-4" />
                         Horas
                       </div>
-                      <div className="mt-1 text-2xl font-bold text-zinc-900">{summary ? `${summary.totals.totalHours} h` : "—"}</div>
+                      <div className="mt-1 text-2xl font-bold text-zinc-900">
+                        {summary ? `${summary.totals.totalHours} h` : "—"}
+                      </div>
                     </div>
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -693,31 +771,46 @@ export default function CashierPanelPage() {
                         <BadgeDollarSign className="h-4 w-4" />
                         Total ($)
                       </div>
-                      <div className="mt-1 text-2xl font-bold text-zinc-900">{summary ? moneyARS(summary.totals.totalPay) : "—"}</div>
-                      <div className="mt-1 text-xs text-zinc-500">Tarifa: {summary ? moneyARS(summary.employee.hourlyRate) : "—"} / hora</div>
+                      <div className="mt-1 text-2xl font-bold text-zinc-900">
+                        {summary ? moneyARS(summary.totals.totalPay) : "—"}
+                      </div>
+                      <div className="mt-1 text-xs text-zinc-500">
+                        Tarifa:{" "}
+                        {summary ? moneyARS(summary.employee.hourlyRate) : "—"}{" "}
+                        / hora
+                      </div>
                     </div>
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                     <div className="flex items-center justify-between text-sm">
                       <div className="text-zinc-600">Días con tareas</div>
-                      <div className="font-semibold text-zinc-900">{quickStats.daysWithWork}</div>
+                      <div className="font-semibold text-zinc-900">
+                        {quickStats.daysWithWork}
+                      </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between text-sm">
                       <div className="text-zinc-600">Tareas registradas</div>
-                      <div className="font-semibold text-zinc-900">{quickStats.totalTasks}</div>
+                      <div className="font-semibold text-zinc-900">
+                        {quickStats.totalTasks}
+                      </div>
                     </div>
                   </div>
                 </CardBody>
               </Card>
 
               <Card>
-                <CardHeader title="Detalle de días" subtitle="Horas por día (semana)" />
+                <CardHeader
+                  title="Detalle de días"
+                  subtitle="Horas por día (semana)"
+                />
                 <CardBody>
                   {!summary ? (
                     <div className="text-sm text-zinc-500">Cargando…</div>
                   ) : summary.items.length === 0 ? (
-                    <div className="text-sm text-zinc-500">No hay registros.</div>
+                    <div className="text-sm text-zinc-500">
+                      No hay registros.
+                    </div>
                   ) : (
                     <div className="space-y-2">
                       {weeklyDaysSorted.map((it) => {
@@ -730,19 +823,30 @@ export default function CashierPanelPage() {
                             key={it.id}
                             className={cn(
                               "flex items-center justify-between rounded-xl border px-3 py-2",
-                              pending ? "border-amber-200 bg-amber-50" : "border-zinc-200 bg-white"
+                              pending
+                                ? "border-amber-200 bg-amber-50"
+                                : "border-zinc-200 bg-white"
                             )}
                           >
                             <div>
-                              <div className="text-sm font-semibold text-zinc-900">{it.dateKey}</div>
+                              <div className="text-sm font-semibold text-zinc-900">
+                                {it.dateKey}
+                              </div>
                               <div className="mt-0.5 text-xs text-zinc-500">
-                                {fmtTime(it.checkInAt)} → {fmtTime(it.checkOutAt)}
+                                {fmtTime(it.checkInAt)} →{" "}
+                                {fmtTime(it.checkOutAt)}
                               </div>
                             </div>
 
                             <div className="text-right">
-                              <div className="text-sm font-semibold text-zinc-900">{it.hours} h</div>
-                              {pending && <div className="text-xs font-semibold text-amber-800">Falta salida</div>}
+                              <div className="text-sm font-semibold text-zinc-900">
+                                {it.hours} h
+                              </div>
+                              {pending && (
+                                <div className="text-xs font-semibold text-amber-800">
+                                  Falta salida
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -758,14 +862,23 @@ export default function CashierPanelPage() {
               <div className="border-b border-zinc-100 px-5 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-zinc-900">Mis tareas (semana)</h2>
-                    <p className="mt-1 text-sm text-zinc-500">Producción registrada por día.</p>
+                    <h2 className="text-lg font-semibold text-zinc-900">
+                      Mis tareas (semana)
+                    </h2>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      Producción registrada por día.
+                    </p>
                   </div>
 
                   <div className="w-full sm:w-80">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <Input value={qTasks} onChange={(e) => setQTasks(e.target.value)} placeholder="Buscar por tarea o notas…" className="pl-9" />
+                      <Input
+                        value={qTasks}
+                        onChange={(e) => setQTasks(e.target.value)}
+                        placeholder="Buscar por tarea o notas…"
+                        className="pl-9"
+                      />
                     </div>
                   </div>
                 </div>
@@ -775,23 +888,40 @@ export default function CashierPanelPage() {
                 {loading ? (
                   <div className="text-sm text-zinc-500">Cargando…</div>
                 ) : filteredProdByDay.length === 0 ? (
-                  <div className="text-sm text-zinc-500">No hay tareas registradas en este rango.</div>
+                  <div className="text-sm text-zinc-500">
+                    No hay tareas registradas en este rango.
+                  </div>
                 ) : (
                   filteredProdByDay.map(([dk, rows]) => {
                     const isOpen = openDays[dk] ?? false;
 
                     return (
-                      <div key={dk} className="rounded-2xl border border-zinc-200 overflow-hidden">
+                      <div
+                        key={dk}
+                        className="rounded-2xl border border-zinc-200 overflow-hidden"
+                      >
                         <button
                           type="button"
-                          onClick={() => setOpenDays((prev) => ({ ...prev, [dk]: !isOpen }))}
+                          onClick={() =>
+                            setOpenDays((prev) => ({ ...prev, [dk]: !isOpen }))
+                          }
                           className="w-full px-4 py-3 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between"
                         >
                           <div className="text-left">
-                            <div className="text-sm font-semibold text-zinc-900">{dk}</div>
-                            <div className="text-xs text-zinc-500">{rows.length} tareas</div>
+                            <div className="text-sm font-semibold text-zinc-900">
+                              {dk}
+                            </div>
+                            <div className="text-xs text-zinc-500">
+                              {rows.length} tareas
+                            </div>
                           </div>
-                          <div className="text-zinc-600">{isOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</div>
+                          <div className="text-zinc-600">
+                            {isOpen ? (
+                              <ChevronUp className="h-5 w-5" />
+                            ) : (
+                              <ChevronDown className="h-5 w-5" />
+                            )}
+                          </div>
                         </button>
 
                         {isOpen && (
@@ -799,9 +929,15 @@ export default function CashierPanelPage() {
                             <table className="min-w-full">
                               <thead className="bg-white">
                                 <tr>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Hora</th>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tarea</th>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Notas</th>
+                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    Hora
+                                  </th>
+                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    Tarea
+                                  </th>
+                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    Notas
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-zinc-100">
@@ -809,10 +945,19 @@ export default function CashierPanelPage() {
                                   .slice()
                                   .sort((a, b) => (a.at < b.at ? 1 : -1))
                                   .map((r) => (
-                                    <tr key={r.id} className="hover:bg-zinc-50/60">
-                                      <td className="px-4 py-3 text-sm text-zinc-700">{fmtDateTime(r.at)}</td>
-                                      <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{r.taskName || r.taskId || "—"}</td>
-                                      <td className="px-4 py-3 text-sm text-zinc-700">{r.notes?.trim() ? r.notes : "—"}</td>
+                                    <tr
+                                      key={r.id}
+                                      className="hover:bg-zinc-50/60"
+                                    >
+                                      <td className="px-4 py-3 text-sm text-zinc-700">
+                                        {fmtDateTime(r.at)}
+                                      </td>
+                                      <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                                        {r.taskName || r.taskId || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 text-sm text-zinc-700">
+                                        {r.notes?.trim() ? r.notes : "—"}
+                                      </td>
                                     </tr>
                                   ))}
                               </tbody>
@@ -835,7 +980,14 @@ export default function CashierPanelPage() {
           <>
             {/* Finance day filter */}
             <Card>
-              <CardHeader title="Finanzas del día" subtitle={stats?.range ? `Rango: ${stats.range.from} → ${stats.range.to}` : "Cargando…"} />
+              <CardHeader
+                title="Finanzas del día"
+                subtitle={
+                  stats?.range
+                    ? `Rango: ${stats.range.from} → ${stats.range.to}`
+                    : "Cargando…"
+                }
+              />
               <CardBody>
                 <div className="grid gap-3 lg:grid-cols-[260px_1fr] lg:items-end">
                   <Field label="Día (dateKey)">
@@ -869,21 +1021,32 @@ export default function CashierPanelPage() {
               <Card>
                 <CardHeader title="Ingresos" subtitle="Total del día" />
                 <CardBody>
-                  <div className="text-2xl font-bold text-zinc-900">{stats ? moneyARS(stats.totals.income) : "—"}</div>
+                  <div className="text-2xl font-bold text-zinc-900">
+                    {stats ? moneyARS(stats.totals.income) : "—"}
+                  </div>
                 </CardBody>
               </Card>
 
               <Card>
                 <CardHeader title="Gastos" subtitle="Total del día" />
                 <CardBody>
-                  <div className="text-2xl font-bold text-zinc-900">{stats ? moneyARS(stats.totals.expense) : "—"}</div>
+                  <div className="text-2xl font-bold text-zinc-900">
+                    {stats ? moneyARS(stats.totals.expense) : "—"}
+                  </div>
                 </CardBody>
               </Card>
 
               <Card>
                 <CardHeader title="Neto" subtitle="Ingresos - Gastos" />
                 <CardBody>
-                  <div className={cn("text-2xl font-bold", (stats?.totals.net ?? 0) >= 0 ? "text-emerald-700" : "text-red-700")}>
+                  <div
+                    className={cn(
+                      "text-2xl font-bold",
+                      (stats?.totals.net ?? 0) >= 0
+                        ? "text-emerald-700"
+                        : "text-red-700"
+                    )}
+                  >
                     {stats ? moneyARS(stats.totals.net) : "—"}
                   </div>
                 </CardBody>
@@ -895,11 +1058,15 @@ export default function CashierPanelPage() {
                   <div className="space-y-1 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Sale</span>
-                      <span className="font-semibold text-zinc-900">{stats ? moneyARS(stats.totals.transferOut) : "—"}</span>
+                      <span className="font-semibold text-zinc-900">
+                        {stats ? moneyARS(stats.totals.transferOut) : "—"}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Entra</span>
-                      <span className="font-semibold text-zinc-900">{stats ? moneyARS(stats.totals.transferIn) : "—"}</span>
+                      <span className="font-semibold text-zinc-900">
+                        {stats ? moneyARS(stats.totals.transferIn) : "—"}
+                      </span>
                     </div>
                     <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
                       <ArrowDownUp className="h-4 w-4" />
@@ -912,7 +1079,10 @@ export default function CashierPanelPage() {
 
             {/* Movements */}
             <Card>
-              <CardHeader title="Movimientos del día" subtitle="Ingresos / Gastos / Transferencias" />
+              <CardHeader
+                title="Movimientos del día"
+                subtitle="Ingresos / Gastos / Transferencias"
+              />
               <CardBody>
                 <div className="grid gap-3 md:grid-cols-4">
                   <Field label="Tipo">
@@ -984,71 +1154,119 @@ export default function CashierPanelPage() {
                   <table className="min-w-full">
                     <thead className="bg-zinc-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Hora</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tipo</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Cuenta</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Categoría</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Monto</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Notas</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Acciones</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Hora
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Tipo
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Cuenta
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Categoría
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Monto
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Notas
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Acciones
+                        </th>
                       </tr>
                     </thead>
 
                     <tbody className="divide-y divide-zinc-100">
                       {movLoading || !movs ? (
                         <tr>
-                          <td colSpan={7} className="px-4 py-6 text-sm text-zinc-500">
+                          <td
+                            colSpan={7}
+                            className="px-4 py-6 text-sm text-zinc-500"
+                          >
                             Cargando movimientos…
                           </td>
                         </tr>
                       ) : movs.items.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-4 py-6 text-sm text-zinc-500">
+                          <td
+                            colSpan={7}
+                            className="px-4 py-6 text-sm text-zinc-500"
+                          >
                             No hay movimientos para este día.
                           </td>
                         </tr>
                       ) : (
                         movs.items.map((r) => {
-                          const typeLabel = r.type === "INCOME" ? "Ingreso" : r.type === "EXPENSE" ? "Gasto" : "Transfer";
+                          const typeLabel =
+                            r.type === "INCOME"
+                              ? "Ingreso"
+                              : r.type === "EXPENSE"
+                              ? "Gasto"
+                              : "Transfer";
 
                           const accName =
                             r.accountNameSnapshot ||
-                            (r.accountId ? accountNameById.get(r.accountId) : null) ||
+                            (r.accountId
+                              ? accountNameById.get(r.accountId)
+                              : null) ||
                             r.accountId ||
                             "—";
 
-                          const toAccName = r.toAccountId ? accountNameById.get(r.toAccountId) || r.toAccountId : null;
+                          const toAccName = r.toAccountId
+                            ? accountNameById.get(r.toAccountId) ||
+                              r.toAccountId
+                            : null;
 
                           const catName =
                             r.categoryNameSnapshot ||
-                            (r.categoryId ? categoryNameById.get(r.categoryId) : null) ||
+                            (r.categoryId
+                              ? categoryNameById.get(r.categoryId)
+                              : null) ||
                             (r.categoryId ? r.categoryId : null) ||
                             (r.type === "TRANSFER" ? "—" : "Sin categoría");
 
                           return (
                             <tr key={r.id} className="hover:bg-zinc-50/60">
-                              <td className="px-4 py-3 text-sm text-zinc-700">{fmtTime(r.createdAt ?? null)}</td>
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                {fmtTime(r.createdAt ?? null)}
+                              </td>
 
-                              <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{typeLabel}</td>
+                              <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                                {typeLabel}
+                              </td>
 
                               <td className="px-4 py-3 text-sm text-zinc-700">
                                 {r.type === "TRANSFER" ? (
                                   <span>
-                                    {accName} <span className="text-zinc-400">→</span> {toAccName || "—"}
+                                    {accName}{" "}
+                                    <span className="text-zinc-400">→</span>{" "}
+                                    {toAccName || "—"}
                                   </span>
                                 ) : (
                                   accName
                                 )}
                               </td>
 
-                              <td className="px-4 py-3 text-sm text-zinc-700">{catName}</td>
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                {catName}
+                              </td>
 
-                              <td className="px-4 py-3 text-right text-sm font-bold text-zinc-900">{moneyARS(r.amount)}</td>
+                              <td className="px-4 py-3 text-right text-sm font-bold text-zinc-900">
+                                {moneyARS(r.amount)}
+                              </td>
 
-                              <td className="px-4 py-3 text-sm text-zinc-700">{r.notes?.trim() ? r.notes : "—"}</td>
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                {r.notes?.trim() ? r.notes : "—"}
+                              </td>
 
                               <td className="px-4 py-3 text-right">
-                                <Button variant="secondary" disabled={busy || r.status === "VOID"} onClick={() => voidMovement(r.id)}>
+                                <Button
+                                  variant="secondary"
+                                  disabled={busy || r.status === "VOID"}
+                                  onClick={() => voidMovement(r.id)}
+                                >
                                   {r.status === "VOID" ? "Anulado" : "Anular"}
                                 </Button>
                               </td>
@@ -1066,12 +1284,16 @@ export default function CashierPanelPage() {
                       Página {movs.page} · {movs.total} movimientos
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="secondary" disabled={busy || movPage <= 1} onClick={() => setMovPage((p) => Math.max(1, p - 1))}>
+                      <Button
+                        variant="secondary"
+                        disabled={busy || movPage <= 1}
+                        onClick={() => setMovPage((p) => Math.max(1, p - 1))}
+                      >
                         Anterior
                       </Button>
                       <Button
                         variant="secondary"
-                        disabled={busy || (movs.page * movs.limit >= movs.total)}
+                        disabled={busy || movs.page * movs.limit >= movs.total}
                         onClick={() => setMovPage((p) => p + 1)}
                       >
                         Siguiente
@@ -1085,56 +1307,104 @@ export default function CashierPanelPage() {
             {/* By account */}
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <div className="border-b border-zinc-100 px-5 py-4">
-                <h2 className="text-lg font-semibold text-zinc-900">Por cuenta</h2>
-                <p className="mt-1 text-sm text-zinc-500">Ingresos, gastos, transferencias y saldo inicio/fin.</p>
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  Por cuenta
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Ingresos, gastos, transferencias y saldo inicio/fin.
+                </p>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="min-w-full">
                   <thead className="bg-zinc-50">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Cuenta</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Ingresos</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Gastos</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Neto</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Transf. In</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Transf. Out</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Saldo Inicio</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Saldo Fin</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Cuenta
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Ingresos
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Gastos
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Neto
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Transf. In
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Transf. Out
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Saldo Inicio
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Saldo Fin
+                      </th>
                     </tr>
                   </thead>
 
                   <tbody className="divide-y divide-zinc-100">
                     {!stats ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-6 text-sm text-zinc-500">
+                        <td
+                          colSpan={8}
+                          className="px-4 py-6 text-sm text-zinc-500"
+                        >
                           Cargando…
                         </td>
                       </tr>
                     ) : byAccountRows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-6 text-sm text-zinc-500">
+                        <td
+                          colSpan={8}
+                          className="px-4 py-6 text-sm text-zinc-500"
+                        >
                           No hay datos para mostrar.
                         </td>
                       </tr>
                     ) : (
                       byAccountRows.map((r) => {
-                        const name = accountNameById.get(r.accountId) ?? r.accountId;
+                        const name =
+                          accountNameById.get(r.accountId) ?? r.accountId;
                         return (
                           <tr key={r.accountId} className="hover:bg-zinc-50/60">
                             <td className="px-4 py-3">
-                              <div className="text-sm font-semibold text-zinc-900">{name}</div>
-                              <div className="text-xs text-zinc-500">{r.accountId}</div>
+                              <div className="text-sm font-semibold text-zinc-900">
+                                {name}
+                              </div>
+                              <div className="text-xs text-zinc-500">
+                                {r.accountId}
+                              </div>
                             </td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.income)}</td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.expense)}</td>
-                            <td className={cn("px-4 py-3 text-right text-sm font-bold", r.net >= 0 ? "text-emerald-700" : "text-red-700")}>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
+                              {moneyARS(r.income)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
+                              {moneyARS(r.expense)}
+                            </td>
+                            <td
+                              className={cn(
+                                "px-4 py-3 text-right text-sm font-bold",
+                                r.net >= 0 ? "text-emerald-700" : "text-red-700"
+                              )}
+                            >
                               {moneyARS(r.net)}
                             </td>
-                            <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.transferIn)}</td>
-                            <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.transferOut)}</td>
-                            <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.startBalance)}</td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.endBalance)}</td>
+                            <td className="px-4 py-3 text-right text-sm text-zinc-700">
+                              {moneyARS(r.transferIn)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-zinc-700">
+                              {moneyARS(r.transferOut)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-zinc-700">
+                              {moneyARS(r.startBalance)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
+                              {moneyARS(r.endBalance)}
+                            </td>
                           </tr>
                         );
                       })
@@ -1148,40 +1418,71 @@ export default function CashierPanelPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <div className="border-b border-zinc-100 px-5 py-4">
-                  <h2 className="text-lg font-semibold text-zinc-900">Categorías</h2>
-                  <p className="mt-1 text-sm text-zinc-500">Totales por categoría (snapshot).</p>
+                  <h2 className="text-lg font-semibold text-zinc-900">
+                    Categorías
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Totales por categoría (snapshot).
+                  </p>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="min-w-full">
                     <thead className="bg-zinc-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tipo</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Categoría</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Total</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Movs</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Tipo
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Categoría
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Total
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Movs
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
                       {!stats ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                          <td
+                            colSpan={4}
+                            className="px-4 py-6 text-sm text-zinc-500"
+                          >
                             Cargando…
                           </td>
                         </tr>
                       ) : categoryRows.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                          <td
+                            colSpan={4}
+                            className="px-4 py-6 text-sm text-zinc-500"
+                          >
                             No hay categorías en este día.
                           </td>
                         </tr>
                       ) : (
                         categoryRows.slice(0, 30).map((r, idx) => (
-                          <tr key={`${r.type}-${r.categoryId ?? "null"}-${idx}`} className="hover:bg-zinc-50/60">
-                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{r.type === "EXPENSE" ? "GASTO" : "INGRESO"}</td>
-                            <td className="px-4 py-3 text-sm text-zinc-700">{r.nameSnapshot || r.categoryId || "Sin categoría"}</td>
-                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">{moneyARS(r.total)}</td>
-                            <td className="px-4 py-3 text-right text-sm text-zinc-700">{r.count}</td>
+                          <tr
+                            key={`${r.type}-${r.categoryId ?? "null"}-${idx}`}
+                            className="hover:bg-zinc-50/60"
+                          >
+                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                              {r.type === "EXPENSE" ? "GASTO" : "INGRESO"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              {r.nameSnapshot ||
+                                r.categoryId ||
+                                "Sin categoría"}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm font-semibold text-zinc-900">
+                              {moneyARS(r.total)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-zinc-700">
+                              {r.count}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -1192,40 +1493,69 @@ export default function CashierPanelPage() {
 
               <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <div className="border-b border-zinc-100 px-5 py-4">
-                  <h2 className="text-lg font-semibold text-zinc-900">Evolución (día)</h2>
-                  <p className="mt-1 text-sm text-zinc-500">Para "día" normalmente es 1 fila.</p>
+                  <h2 className="text-lg font-semibold text-zinc-900">
+                    Evolución (día)
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Para "día" normalmente es 1 fila.
+                  </p>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="min-w-full">
                     <thead className="bg-zinc-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Día</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Ingresos</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Gastos</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">Neto</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Día
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Ingresos
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Gastos
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Neto
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
                       {!stats ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                          <td
+                            colSpan={4}
+                            className="px-4 py-6 text-sm text-zinc-500"
+                          >
                             Cargando…
                           </td>
                         </tr>
                       ) : stats.seriesDaily.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                          <td
+                            colSpan={4}
+                            className="px-4 py-6 text-sm text-zinc-500"
+                          >
                             No hay datos en este día.
                           </td>
                         </tr>
                       ) : (
                         stats.seriesDaily.map((r) => (
                           <tr key={r.dateKey} className="hover:bg-zinc-50/60">
-                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{r.dateKey}</td>
-                            <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.income)}</td>
-                            <td className="px-4 py-3 text-right text-sm text-zinc-700">{moneyARS(r.expense)}</td>
-                            <td className={cn("px-4 py-3 text-right text-sm font-bold", r.net >= 0 ? "text-emerald-700" : "text-red-700")}>
+                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                              {r.dateKey}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-zinc-700">
+                              {moneyARS(r.income)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-zinc-700">
+                              {moneyARS(r.expense)}
+                            </td>
+                            <td
+                              className={cn(
+                                "px-4 py-3 text-right text-sm font-bold",
+                                r.net >= 0 ? "text-emerald-700" : "text-red-700"
+                              )}
+                            >
                               {moneyARS(r.net)}
                             </td>
                           </tr>
@@ -1239,21 +1569,35 @@ export default function CashierPanelPage() {
 
             {/* Quick links */}
             <Card>
-              <CardHeader title="Accesos rápidos" subtitle="Carga diaria y gestión" />
+              <CardHeader
+                title="Accesos rápidos"
+                subtitle="Carga diaria y gestión"
+              />
               <CardBody>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" onClick={() => (window.location.href = "/cashier/incomes")}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => (window.location.href = "/cashier/incomes")}
+                  >
                     Cargar ingresos
                   </Button>
-                  <Button variant="secondary" onClick={() => (window.location.href = "/cashier/expenses")}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => (window.location.href = "/cashier/expenses")}
+                  >
                     Cargar gastos
                   </Button>
-                  <Button variant="secondary" onClick={() => (window.location.href = "/cashier/closing")}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => (window.location.href = "/cashier/closing")}
+                  >
                     Cierre del día
                   </Button>
                 </div>
 
-                <p className="mt-3 text-xs text-zinc-500">Después agregamos creación inline de movimientos y cierre UI.</p>
+                <p className="mt-3 text-xs text-zinc-500">
+                  Después agregamos creación inline de movimientos y cierre UI.
+                </p>
               </CardBody>
             </Card>
           </>

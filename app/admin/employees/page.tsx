@@ -5,7 +5,7 @@ import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
-import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { Card, CardBody } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 import {
   RefreshCcw,
@@ -20,16 +20,18 @@ import {
   Save,
   X,
   Power,
-  Copy,
   CheckCircle2,
   AlertTriangle,
   Filter,
+  ChevronUp,
+  ChevronDown,
+  Info,
 } from "lucide-react";
 
 type EmployeeRow = {
   id: string;
   fullName: string;
-  hireDate: string; // ISO
+  hireDate: string; // ISO o YYYY-MM-DD
   hourlyRate: number;
   userId?: string | null; // ObjectId
   isActive: boolean;
@@ -76,6 +78,34 @@ function StatusPill({ active }: { active: boolean }) {
     >
       {active ? "ACTIVO" : "INACTIVO"}
     </span>
+  );
+}
+
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "error" | "ok";
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-3 py-2 text-sm",
+        tone === "error"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      )}
+    >
+      <span className="inline-flex items-center gap-2">
+        {tone === "error" ? (
+          <AlertTriangle className="h-4 w-4" />
+        ) : (
+          <CheckCircle2 className="h-4 w-4" />
+        )}
+        {children}
+      </span>
+    </div>
   );
 }
 
@@ -147,9 +177,16 @@ export default function AdminEmployeesPage() {
   const totalLabel = useMemo(() => {
     const shown = filtered.length;
     const total = items.length;
-    const base = !q.trim() ? `${total} empleado${total === 1 ? "" : "s"}` : `${shown} de ${total}`;
+    const base = !q.trim()
+      ? `${total} empleado${total === 1 ? "" : "s"}`
+      : `${shown} de ${total}`;
     return onlyActive ? `${base} (solo activos)` : base;
   }, [filtered.length, items.length, q, onlyActive]);
+
+  function flashOk(msg: string) {
+    setOkMsg(msg);
+    window.setTimeout(() => setOkMsg(null), 1800);
+  }
 
   async function load() {
     setError(null);
@@ -160,6 +197,7 @@ export default function AdminEmployeesPage() {
         apiFetchAuthed<EmployeeRow[]>(getAccessToken, "/employees"),
         apiFetchAuthed<UserRow[]>(getAccessToken, "/admin/users"),
       ]);
+
       setItems(emps);
       setUsers(us);
 
@@ -172,8 +210,7 @@ export default function AdminEmployeesPage() {
         return next;
       });
 
-      setOkMsg("Datos actualizados ✔");
-      window.setTimeout(() => setOkMsg(null), 1800);
+      flashOk("Datos actualizados ✔");
     } catch (e: any) {
       setError(e?.message || "Error cargando empleados/usuarios");
     } finally {
@@ -213,9 +250,7 @@ export default function AdminEmployeesPage() {
       setHourlyRate(0);
       setNewUserId("");
 
-      setOkMsg("Empleado creado ✔");
-      window.setTimeout(() => setOkMsg(null), 1800);
-
+      flashOk("Empleado creado ✔");
       await load();
     } catch (e: any) {
       setError(e?.message || "Error creando empleado");
@@ -239,6 +274,8 @@ export default function AdminEmployeesPage() {
   }
 
   async function saveEdit(id: string) {
+    if (!editFullName.trim() || !editHireDate.trim()) return;
+
     setError(null);
     setOkMsg(null);
     setBusy(true);
@@ -253,8 +290,7 @@ export default function AdminEmployeesPage() {
       });
 
       cancelEdit();
-      setOkMsg("Empleado actualizado ✔");
-      window.setTimeout(() => setOkMsg(null), 1800);
+      flashOk("Empleado actualizado ✔");
       await load();
     } catch (e: any) {
       setError(e?.message || "Error actualizando empleado");
@@ -265,10 +301,10 @@ export default function AdminEmployeesPage() {
 
   async function toggleActive(e: EmployeeRow) {
     const next = !e.isActive;
-    const ok = window.confirm(
+    const okConfirm = window.confirm(
       next ? `¿Reactivar a ${e.fullName}?` : `¿Desactivar a ${e.fullName}?`
     );
-    if (!ok) return;
+    if (!okConfirm) return;
 
     setError(null);
     setOkMsg(null);
@@ -279,9 +315,7 @@ export default function AdminEmployeesPage() {
         body: JSON.stringify({ isActive: next }),
       });
 
-      setOkMsg(next ? "Empleado reactivado ✔" : "Empleado desactivado ✔");
-      window.setTimeout(() => setOkMsg(null), 1800);
-
+      flashOk(next ? "Empleado reactivado ✔" : "Empleado desactivado ✔");
       await load();
     } catch (err: any) {
       setError(err?.message || "Error cambiando estado");
@@ -306,9 +340,7 @@ export default function AdminEmployeesPage() {
         body: JSON.stringify({ userId: selected ? selected : null }),
       });
 
-      setOkMsg("Vínculo actualizado ✔");
-      window.setTimeout(() => setOkMsg(null), 1800);
-
+      flashOk("Vínculo actualizado ✔");
       await load();
     } catch (e: any) {
       setError(e?.message || "Error vinculando usuario");
@@ -318,8 +350,8 @@ export default function AdminEmployeesPage() {
   }
 
   async function unlink(employeeId: string) {
-    const ok = window.confirm("¿Desvincular usuario de este empleado?");
-    if (!ok) return;
+    const okConfirm = window.confirm("¿Desvincular usuario de este empleado?");
+    if (!okConfirm) return;
 
     setError(null);
     setOkMsg(null);
@@ -333,9 +365,7 @@ export default function AdminEmployeesPage() {
       // optimista
       setLinkDraft((p) => ({ ...p, [employeeId]: "" }));
 
-      setOkMsg("Usuario desvinculado ✔");
-      window.setTimeout(() => setOkMsg(null), 1800);
-
+      flashOk("Usuario desvinculado ✔");
       await load();
     } catch (e: any) {
       setError(e?.message || "Error desvinculando usuario");
@@ -347,8 +377,7 @@ export default function AdminEmployeesPage() {
   async function copyText(txt: string) {
     try {
       await navigator.clipboard.writeText(txt);
-      setOkMsg("Copiado ✔");
-      window.setTimeout(() => setOkMsg(null), 1000);
+      flashOk("Copiado ✔");
     } catch {
       // noop
     }
@@ -356,125 +385,177 @@ export default function AdminEmployeesPage() {
 
   return (
     <AdminProtected>
-      <div className="min-h-screen bg-zinc-50">
-        <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
-          {/* Sticky header */}
-          <div className="sticky top-0 z-10 -mx-4 border-b border-zinc-200 bg-white/80 px-4 py-4 backdrop-blur">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h1 className="text-2xl font-bold text-zinc-900">Admin • Empleados</h1>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Nombre, fecha de ingreso, $/hora y vínculo a usuario.
-                </p>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+                Empleados
+              </h1>
+              <p className="mt-1 text-sm text-zinc-500">
+                Nombre, fecha de ingreso, $/hora y vínculo a usuario.
+              </p>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                    Total: {totals.total}
-                  </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                    Activos: {totals.active}
-                  </span>
-                  <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                    Vinculados: {totals.linked}
-                  </span>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                  Total: {totals.total}
+                </span>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                  Activos: {totals.active}
+                </span>
+                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                  Vinculados: {totals.linked}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={load}
+                disabled={busy}
+                loading={loadingList}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                </span>
+              </Button>
+
+              <button
+                type="button"
+                title="Ir a búsqueda"
+                onClick={() => searchRef.current?.focus()}
+                disabled={loadingList}
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-60"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {(error || okMsg) && (
+          <div className="grid gap-2">
+            {error && <Notice tone="error">{error}</Notice>}
+            {!error && okMsg && <Notice tone="ok">{okMsg}</Notice>}
+          </div>
+        )}
+
+        {/* Search + filter */}
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar por nombre…"
+                className="pl-9"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOnlyActive((v) => !v)}
+              className={cn(
+                "h-10 rounded-xl border px-3 text-sm font-semibold transition inline-flex items-center gap-2",
+                onlyActive
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+              )}
+            >
+              <Filter className="h-4 w-4" />
+              {onlyActive ? "Solo activos" : "Todos"}
+            </button>
+
+            <div className="text-sm text-zinc-500">{totalLabel}</div>
+          </div>
+        </div>
+
+        {/* Create employee (collapsible) */}
+        <Card>
+          {/* Header */}
+          <button
+            type="button"
+            onClick={() => setCreateOpen((v) => !v)}
+            className={cn(
+              "w-full text-left",
+              "flex items-start justify-between gap-4 px-5 pt-5",
+              "rounded-2xl",
+              "hover:bg-zinc-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
+            )}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="text-base font-semibold text-zinc-900">
+                  Crear empleado
+                </div>
+
+                {/* Badge estado */}
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                    createOpen
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-zinc-200 bg-white text-zinc-600"
+                  )}
+                >
+                  {createOpen ? "Abierto" : "Cerrado"}
+                </span>
+              </div>
+
+              <div className="mt-1 text-sm text-zinc-500">
+                Alta de empleado y vínculo opcional con usuario.
+              </div>
+            </div>
+
+            {/* Toggle button (visual) */}
+            <div
+              className={cn(
+                "shrink-0",
+                "inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold",
+                "border-zinc-200 text-zinc-800 hover:bg-zinc-50"
+              )}
+              aria-hidden="true"
+            >
+              {createOpen ? (
+                <>
+                  <ChevronUp className="h-4 w-4" />
+                  Ocultar
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4" />
+                  Mostrar
+                </>
+              )}
+            </div>
+          </button>
+
+          {/* Body */}
+          <div
+            className={cn(
+              "overflow-hidden transition-[max-height,opacity] duration-300 ease-out",
+              createOpen ? "max-h-[520px] opacity-100" : "max-h-0 opacity-0"
+            )}
+          >
+            <CardBody>
+              {/* Tip superior */}
+              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
+                <div className="flex items-start gap-2">
+                  <Info className="mt-0.5 h-4 w-4 text-zinc-400" />
+                  <div>
+                    Completá <b>Nombre</b> y <b>Fecha ingreso</b>. El usuario es
+                    opcional.
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={load}
-                  disabled={busy}
-                  loading={loadingList}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <RefreshCcw className="h-4 w-4" />
-                    Refrescar
-                  </span>
-                </Button>
-
-                <button
-                  type="button"
-                  title="Ir a búsqueda"
-                  onClick={() => searchRef.current?.focus()}
-                  disabled={loadingList}
-                  className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-60"
-                >
-                  <Search className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Search + filter */}
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-center">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Buscar por nombre…"
-                  className="pl-9"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setOnlyActive((v) => !v)}
-                className={cn(
-                  "h-10 rounded-xl border px-3 text-sm font-semibold transition inline-flex items-center gap-2",
-                  onlyActive
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
-                )}
-              >
-                <Filter className="h-4 w-4" />
-                {onlyActive ? "Solo activos" : "Todos"}
-              </button>
-
-              <div className="text-sm text-zinc-500">{totalLabel}</div>
-            </div>
-
-            {(error || okMsg) && (
-              <div className="mt-3 grid gap-2">
-                {error && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    <span className="inline-flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4" />
-                      {error}
-                    </span>
-                  </div>
-                )}
-                {okMsg && (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    <span className="inline-flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4" />
-                      {okMsg}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Create employee (collapsible) */}
-          <Card>
-            <div className="flex items-start justify-between gap-4 px-5 pt-5">
-              <div>
-                <div className="text-base font-semibold text-zinc-900">Crear empleado</div>
-                <div className="mt-1 text-sm text-zinc-500">Solo ADMIN</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCreateOpen((v) => !v)}
-                className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-              >
-                {createOpen ? "Ocultar" : "Mostrar"}
-              </button>
-            </div>
-
-            {createOpen && (
-              <CardBody>
-                <div className="grid gap-3 md:grid-cols-5">
+              {/* Grid más “respirable” */}
+              <div className="grid gap-4 md:grid-cols-12">
+                {/* Nombre */}
+                <div className="md:col-span-5">
                   <Field label="Nombre">
                     <div className="relative">
                       <UserIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -485,8 +566,16 @@ export default function AdminEmployeesPage() {
                         className="pl-9"
                       />
                     </div>
+                    {!fullName.trim() && (
+                      <div className="mt-1 text-xs text-zinc-500">
+                        Requerido para crear el empleado.
+                      </div>
+                    )}
                   </Field>
+                </div>
 
+                {/* Fecha ingreso */}
+                <div className="md:col-span-3">
                   <Field label="Fecha ingreso">
                     <div className="relative">
                       <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -497,8 +586,16 @@ export default function AdminEmployeesPage() {
                         className="pl-9"
                       />
                     </div>
+                    {!hireDate.trim() && (
+                      <div className="mt-1 text-xs text-zinc-500">
+                        Requerida.
+                      </div>
+                    )}
                   </Field>
+                </div>
 
+                {/* Pago por hora */}
+                <div className="md:col-span-2">
                   <Field label="Pago por hora">
                     <div className="relative">
                       <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -509,15 +606,40 @@ export default function AdminEmployeesPage() {
                         placeholder="Ej: 3500"
                         className="pl-9"
                         inputMode="numeric"
+                        min={0}
                       />
                     </div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      Vista: {money(hourlyRate)}
+                      Vista:{" "}
+                      <span className="font-semibold text-zinc-700">
+                        {money(hourlyRate)}
+                      </span>
                     </div>
                   </Field>
+                </div>
 
+                {/* CTA */}
+                <div className="md:col-span-2 flex items-end">
+                  <Button
+                    className="w-full"
+                    onClick={createEmployee}
+                    disabled={busy || !fullName.trim() || !hireDate.trim()}
+                    loading={busy}
+                  >
+                    <span className="inline-flex items-center gap-2 text-black">
+                      <Plus className="h-4 w-4" />
+                      Crear
+                    </span>
+                  </Button>
+                </div>
+
+                {/* Usuario (opcional) en fila 2 para que respire */}
+                <div className="md:col-span-6">
                   <Field label="Usuario (opcional)">
-                    <Select value={newUserId} onChange={(e) => setNewUserId(e.target.value)}>
+                    <Select
+                      value={newUserId}
+                      onChange={(e) => setNewUserId(e.target.value)}
+                    >
                       <option value="">— Sin usuario —</option>
                       {users.map((u) => (
                         <option key={u.id} value={u.id}>
@@ -525,271 +647,318 @@ export default function AdminEmployeesPage() {
                         </option>
                       ))}
                     </Select>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      Si lo vinculás, el empleado queda conectado al usuario
+                      para permisos/reportes.
+                    </div>
                   </Field>
+                </div>
 
-                  <div className="flex items-end">
-                    <Button
-                      className="w-full"
-                      onClick={createEmployee}
-                      disabled={busy || !fullName.trim() || !hireDate.trim()}
-                      loading={busy}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <Plus className="h-4 w-4" />
-                        Crear
-                      </span>
-                    </Button>
+                {/* Mini resumen a la derecha */}
+                <div className="md:col-span-6">
+                  <div className="h-full rounded-2xl border border-zinc-200 bg-white p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Resumen
+                    </div>
+                    <div className="mt-2 grid gap-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-500">Nombre</span>
+                        <span className="font-semibold text-zinc-900">
+                          {fullName.trim() || "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-500">Ingreso</span>
+                        <span className="font-semibold text-zinc-900">
+                          {hireDate.trim() || "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-500">Hora</span>
+                        <span className="font-semibold text-zinc-900">
+                          {money(hourlyRate)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-500">Usuario</span>
+                        <span className="font-semibold text-zinc-900">
+                          {newUserId ? "Vinculado" : "No"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </CardBody>
-            )}
-          </Card>
+              </div>
+            </CardBody>
+          </div>
+        </Card>
 
-          {/* List */}
-          <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
-            <div className="border-b border-zinc-100 px-5 py-4">
-              <h2 className="text-lg font-semibold text-zinc-900">Listado</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Editá inline, activá/desactivá y vinculá usuarios.
-              </p>
-            </div>
+        {/* List */}
+        <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-zinc-100 px-5 py-4">
+            <h2 className="text-lg font-semibold text-zinc-900">Listado</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Editá inline, activá/desactivá y vinculá usuarios.
+            </p>
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50">
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Empleado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Ingreso
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    $/hora
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Usuario
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Estado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-zinc-100">
+                {loadingList && (
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Empleado
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Ingreso
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      $/hora
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Usuario
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Estado
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Acciones
-                    </th>
+                    <td colSpan={6} className="px-4 py-6 text-sm text-zinc-500">
+                      Cargando…
+                    </td>
                   </tr>
-                </thead>
+                )}
 
-                <tbody className="divide-y divide-zinc-100">
-                  {loadingList && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-6 text-sm text-zinc-500">
-                        Cargando…
-                      </td>
-                    </tr>
-                  )}
+                {!loadingList && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-sm text-zinc-500">
+                      No hay empleados.
+                    </td>
+                  </tr>
+                )}
 
-                  {!loadingList && filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-6 text-sm text-zinc-500">
-                        No hay empleados.
-                      </td>
-                    </tr>
-                  )}
+                {!loadingList &&
+                  filtered.map((e) => {
+                    const isEditing = editingId === e.id;
 
-                  {!loadingList &&
-                    filtered.map((e) => {
-                      const isEditing = editingId === e.id;
+                    const currentUserId = e.userId ?? "";
+                    const draft = linkDraft[e.id] ?? currentUserId;
+                    const currentUser = currentUserId
+                      ? usersById.get(currentUserId)
+                      : null;
 
-                      const currentUserId = e.userId ?? "";
-                      const draft = linkDraft[e.id] ?? currentUserId;
-                      const currentUser = currentUserId ? usersById.get(currentUserId) : null;
+                    const draftDiffers = draft !== (currentUserId || "");
 
-                      const draftDiffers = draft !== (currentUserId || "");
+                    return (
+                      <tr key={e.id} className="hover:bg-zinc-50/60">
+                        {/* Empleado */}
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <Input
+                              value={editFullName}
+                              onChange={(ev) =>
+                                setEditFullName(ev.target.value)
+                              }
+                            />
+                          ) : (
+                            <div>
+                              <div className="text-sm font-semibold text-zinc-900">
+                                {e.fullName}
+                              </div>
+                              <div className="mt-1 text-xs text-zinc-500">
+                                ID:{" "}
+                                <button
+                                  type="button"
+                                  className="underline decoration-zinc-300 hover:decoration-zinc-500"
+                                  onClick={() => copyText(e.id)}
+                                >
+                                  copiar
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
 
-                      return (
-                        <tr key={e.id} className="hover:bg-zinc-50/60">
-                          {/* Empleado */}
-                          <td className="px-4 py-3">
-                            {isEditing ? (
-                              <Input
-                                value={editFullName}
-                                onChange={(ev) => setEditFullName(ev.target.value)}
-                              />
-                            ) : (
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <div className="text-sm font-semibold text-zinc-900">
-                                    {e.fullName}
-                                  </div>
-                                  <div className="mt-1 text-xs text-zinc-500">
-                                    ID:{" "}
-                                    <button
-                                      type="button"
-                                      className="underline decoration-zinc-300 hover:decoration-zinc-500"
-                                      onClick={() => copyText(e.id)}
-                                    >
-                                      copiar
-                                    </button>
-                                  </div>
-                                </div>
+                        {/* Ingreso */}
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <Input
+                              type="date"
+                              value={editHireDate}
+                              onChange={(ev) =>
+                                setEditHireDate(ev.target.value)
+                              }
+                            />
+                          ) : (
+                            <div className="text-sm text-zinc-700">
+                              {e.hireDate?.slice(0, 10)}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* hourly */}
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <Input
+                              type="number"
+                              value={String(editHourlyRate)}
+                              onChange={(ev) =>
+                                setEditHourlyRate(Number(ev.target.value))
+                              }
+                              inputMode="numeric"
+                            />
+                          ) : (
+                            <div className="text-sm text-zinc-700">
+                              {money(e.hourlyRate)}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Usuario link */}
+                        <td className="px-4 py-3">
+                          <div className="grid gap-2">
+                            <Select
+                              value={draft}
+                              disabled={busy || isEditing}
+                              onChange={(ev) =>
+                                setLinkDraft((p) => ({
+                                  ...p,
+                                  [e.id]: ev.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">— Sin usuario —</option>
+                              {users.map((u) => (
+                                <option key={u.id} value={u.id}>
+                                  {userLabel(u)}
+                                </option>
+                              ))}
+                            </Select>
+
+                            {!isEditing && (
+                              <div className="text-xs text-zinc-500">
+                                {currentUser ? (
+                                  <span>
+                                    Actual:{" "}
+                                    <span className="font-medium text-zinc-700">
+                                      {currentUser.email}
+                                    </span>
+                                  </span>
+                                ) : currentUserId ? (
+                                  <span>Actual: {currentUserId}</span>
+                                ) : (
+                                  <span>Sin vínculo</span>
+                                )}
                               </div>
                             )}
-                          </td>
 
-                          {/* Ingreso */}
-                          <td className="px-4 py-3">
-                            {isEditing ? (
-                              <Input
-                                type="date"
-                                value={editHireDate}
-                                onChange={(ev) => setEditHireDate(ev.target.value)}
-                              />
-                            ) : (
-                              <div className="text-sm text-zinc-700">{e.hireDate?.slice(0, 10)}</div>
-                            )}
-                          </td>
-
-                          {/* hourly */}
-                          <td className="px-4 py-3">
-                            {isEditing ? (
-                              <Input
-                                type="number"
-                                value={String(editHourlyRate)}
-                                onChange={(ev) => setEditHourlyRate(Number(ev.target.value))}
-                                inputMode="numeric"
-                              />
-                            ) : (
-                              <div className="text-sm text-zinc-700">{money(e.hourlyRate)}</div>
-                            )}
-                          </td>
-
-                          {/* Usuario link */}
-                          <td className="px-4 py-3">
-                            <div className="grid gap-2">
-                              <Select
-                                value={draft}
-                                disabled={busy || isEditing}
-                                onChange={(ev) =>
-                                  setLinkDraft((p) => ({
-                                    ...p,
-                                    [e.id]: ev.target.value,
-                                  }))
-                                }
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="secondary"
+                                disabled={busy || isEditing || !draftDiffers}
+                                onClick={() => saveLink(e.id)}
                               >
-                                <option value="">— Sin usuario —</option>
-                                {users.map((u) => (
-                                  <option key={u.id} value={u.id}>
-                                    {userLabel(u)}
-                                  </option>
-                                ))}
-                              </Select>
+                                <span className="inline-flex items-center gap-2">
+                                  <Link2 className="h-4 w-4" />
+                                  Guardar
+                                </span>
+                              </Button>
 
-                              {!isEditing && (
-                                <div className="text-xs text-zinc-500">
-                                  {currentUser ? (
-                                    <span>
-                                      Actual: <span className="font-medium text-zinc-700">{currentUser.email}</span>
-                                    </span>
-                                  ) : currentUserId ? (
-                                    <span>Actual: {currentUserId}</span>
-                                  ) : (
-                                    <span>Sin vínculo</span>
-                                  )}
-                                </div>
-                              )}
+                              <Button
+                                variant="secondary"
+                                disabled={busy || isEditing || !currentUserId}
+                                onClick={() => unlink(e.id)}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  <Unlink2 className="h-4 w-4" />
+                                  Desvincular
+                                </span>
+                              </Button>
+                            </div>
+                          </div>
+                        </td>
 
-                              <div className="flex flex-wrap gap-2">
+                        {/* Estado */}
+                        <td className="px-4 py-3">
+                          <StatusPill active={e.isActive} />
+                        </td>
+
+                        {/* Acciones */}
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {!isEditing ? (
+                              <>
                                 <Button
                                   variant="secondary"
-                                  disabled={busy || isEditing || !draftDiffers}
-                                  onClick={() => saveLink(e.id)}
+                                  disabled={busy}
+                                  onClick={() => startEdit(e)}
                                 >
                                   <span className="inline-flex items-center gap-2">
-                                    <Link2 className="h-4 w-4" />
+                                    <Pencil className="h-4 w-4" />
+                                    Editar
+                                  </span>
+                                </Button>
+
+                                <Button
+                                  variant={e.isActive ? "danger" : "secondary"}
+                                  disabled={busy}
+                                  onClick={() => toggleActive(e)}
+                                >
+                                  <span className="inline-flex items-center gap-2">
+                                    <Power className="h-4 w-4" />
+                                    {e.isActive ? "Desactivar" : "Reactivar"}
+                                  </span>
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="secondary"
+                                  disabled={busy}
+                                  onClick={cancelEdit}
+                                >
+                                  <span className="inline-flex items-center gap-2">
+                                    <X className="h-4 w-4" />
+                                    Cancelar
+                                  </span>
+                                </Button>
+
+                                <Button
+                                  disabled={
+                                    busy ||
+                                    !editFullName.trim() ||
+                                    !editHireDate.trim()
+                                  }
+                                  loading={busy}
+                                  onClick={() => saveEdit(e.id)}
+                                >
+                                  <span className="inline-flex items-center gap-2">
+                                    <Save className="h-4 w-4" />
                                     Guardar
                                   </span>
                                 </Button>
-
-                                <Button
-                                  variant="secondary"
-                                  disabled={busy || isEditing || !currentUserId}
-                                  onClick={() => unlink(e.id)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Unlink2 className="h-4 w-4" />
-                                    Desvincular
-                                  </span>
-                                </Button>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Estado */}
-                          <td className="px-4 py-3">
-                            <StatusPill active={e.isActive} />
-                          </td>
-
-                          {/* Acciones */}
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {!isEditing ? (
-                                <>
-                                  <Button
-                                    variant="secondary"
-                                    disabled={busy}
-                                    onClick={() => startEdit(e)}
-                                  >
-                                    <span className="inline-flex items-center gap-2">
-                                      <Pencil className="h-4 w-4" />
-                                      Editar
-                                    </span>
-                                  </Button>
-
-                                  <Button
-                                    variant={e.isActive ? "danger" : "secondary"}
-                                    disabled={busy}
-                                    onClick={() => toggleActive(e)}
-                                  >
-                                    <span className="inline-flex items-center gap-2">
-                                      <Power className="h-4 w-4" />
-                                      {e.isActive ? "Desactivar" : "Reactivar"}
-                                    </span>
-                                  </Button>
-                                </>
-                              ) : (
-                                <>
-                                  <Button variant="secondary" disabled={busy} onClick={cancelEdit}>
-                                    <span className="inline-flex items-center gap-2">
-                                      <X className="h-4 w-4" />
-                                      Cancelar
-                                    </span>
-                                  </Button>
-                                  <Button
-                                    disabled={busy || !editFullName.trim() || !editHireDate.trim()}
-                                    loading={busy}
-                                    onClick={() => saveEdit(e.id)}
-                                  >
-                                    <span className="inline-flex items-center gap-2">
-                                      <Save className="h-4 w-4" />
-                                      Guardar
-                                    </span>
-                                  </Button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
           </div>
+        </div>
 
-          <div className="text-xs text-zinc-500">
-            Tip: si querés evitar el mismo usuario asignado a 2 empleados, lo validamos en backend
-            (unique parcial sobre userId).
-          </div>
+        <div className="text-xs text-zinc-500">
+          Tip: si querés evitar el mismo usuario asignado a 2 empleados, lo
+          validamos en backend (índice unique parcial sobre userId).
         </div>
       </div>
     </AdminProtected>
