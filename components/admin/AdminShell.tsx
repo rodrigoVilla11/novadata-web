@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -11,13 +11,39 @@ import {
   ArrowLeft,
   Menu,
   X,
+  ChevronDown,
+  ChevronRight,
+  LayoutDashboard,
+  Users,
+  UserCog,
+  Truck,
+  Package,
+  Boxes,
+  Layers,
+  Tags,
+  ClipboardList,
+  CalendarCheck2,
+  Factory,
 } from "lucide-react";
 
-type NavItem = {
+type NavLink = {
+  type: "link";
   href: string;
   label: string;
   roles?: string[];
+  icon?: React.ReactNode;
 };
+
+type NavGroup = {
+  type: "group";
+  id: string;
+  label: string;
+  roles?: string[];
+  icon?: React.ReactNode;
+  children: NavLink[];
+};
+
+type NavItem = NavLink | NavGroup;
 
 function cx(...cls: Array<string | false | null | undefined>) {
   return cls.filter(Boolean).join(" ");
@@ -29,31 +55,224 @@ function hasAnyRole(userRoles: string[] | undefined, allowed?: string[]) {
   return allowed.some((r) => set.has(r.toUpperCase()));
 }
 
-export default function AdminShell({ children }: { children: React.ReactNode }) {
+function isActivePath(pathname: string, href: string) {
+  if (href === "/admin") return pathname === "/admin";
+  return (
+    pathname === href ||
+    pathname.startsWith(href + "/") ||
+    pathname.startsWith(href)
+  );
+}
+
+export default function AdminShell({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
 
   const [mobileOpen, setMobileOpen] = useState(false);
-
   const roles = (user?.roles ?? []).map((r: string) => String(r).toUpperCase());
 
+  // ---------------- NAV ----------------
   const nav: NavItem[] = [
-    { href: "/admin", label: "Dashboard", roles: ["ADMIN", "MANAGER"] },
-    { href: "/admin/users", label: "Usuarios", roles: ["ADMIN"] },
-    { href: "/admin/employees", label: "Empleados", roles: ["ADMIN"] },
-    { href: "/admin/ingredients", label: "Ingredientes", roles: ["ADMIN"] },
-    { href: "/admin/tasks", label: "Tareas", roles: ["ADMIN"] },
-    { href: "/admin/suppliers", label: "Proveedores", roles: ["ADMIN"] },
-    { href: "/admin/attendance", label: "Asistencia", roles: ["ADMIN"] },
+    {
+      type: "link",
+      href: "/admin",
+      label: "Dashboard",
+      roles: ["ADMIN", "MANAGER"],
+      icon: <LayoutDashboard className="h-4 w-4" />,
+    },
+
+    {
+      type: "group",
+      id: "catalog",
+      label: "Catálogo",
+      roles: ["ADMIN", "MANAGER"],
+      icon: <Package className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/categories",
+          label: "Categorías",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Tags className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/products",
+          label: "Productos",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Boxes className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/ingredients",
+          label: "Ingredientes",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Package className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/preparations",
+          label: "Preparaciones",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Layers className="h-4 w-4" />,
+        },
+      ],
+    },
+
+    {
+      type: "group",
+      id: "inventory",
+      label: "Inventario",
+      roles: ["ADMIN", "MANAGER"],
+      icon: <Boxes className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/stock",
+          label: "Stock (conteo diario)",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <ClipboardList className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/suppliers",
+          label: "Proveedores",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Truck className="h-4 w-4" />,
+        },
+      ],
+    },
+
+    {
+      type: "group",
+      id: "operation",
+      label: "Operación",
+      roles: ["ADMIN", "MANAGER"],
+      icon: <Boxes className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/cash",
+          label: "Caja",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <ClipboardList className="h-4 w-4" />,
+        },
+      ],
+    },
+
+    {
+      type: "group",
+      id: "people",
+      label: "Personas",
+      roles: ["ADMIN"],
+      icon: <Users className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/users",
+          label: "Usuarios",
+          roles: ["ADMIN"],
+          icon: <UserCog className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/employees",
+          label: "Empleados",
+          roles: ["ADMIN"],
+          icon: <Factory className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/attendance",
+          label: "Asistencia",
+          roles: ["ADMIN"],
+          icon: <CalendarCheck2 className="h-4 w-4" />,
+        },
+      ],
+    },
+
+    {
+      type: "link",
+      href: "/admin/tasks",
+      label: "Tareas",
+      roles: ["ADMIN"],
+      icon: <ClipboardList className="h-4 w-4" />,
+    },
   ];
+
+  // ---------------- open groups state ----------------
+  const initialOpenGroups = useMemo(() => {
+    const open: Record<string, boolean> = {};
+    for (const item of nav) {
+      if (item.type === "group") {
+        const hasActiveChild = item.children.some((c) =>
+          isActivePath(pathname, c.href)
+        );
+        open[item.id] = hasActiveChild;
+      }
+    }
+    return open;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  const [openGroups, setOpenGroups] =
+    useState<Record<string, boolean>>(initialOpenGroups);
+
+  // keep active group expanded when route changes
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const next = { ...prev };
+      for (const item of nav) {
+        if (item.type !== "group") continue;
+        const hasActiveChild = item.children.some((c) =>
+          isActivePath(pathname, c.href)
+        );
+        if (hasActiveChild) next[item.id] = true;
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  function toggleGroup(id: string) {
+    setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function onNavigate() {
+    setMobileOpen(false);
+  }
+
+  // Filter items by role (groups hidden if no children visible)
+  const visibleNav = useMemo(() => {
+    const out: NavItem[] = [];
+
+    for (const item of nav) {
+      if (item.type === "link") {
+        if (hasAnyRole(roles, item.roles)) out.push(item);
+        continue;
+      }
+
+      // group
+      if (!hasAnyRole(roles, item.roles)) continue;
+
+      const children = item.children.filter((c) => hasAnyRole(roles, c.roles));
+      if (children.length === 0) continue;
+
+      out.push({ ...item, children });
+    }
+
+    return out;
+  }, [nav, roles]);
 
   return (
     <AdminProtected>
       <div className="flex h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 overflow-hidden">
-        {/* ===================== */}
         {/* MOBILE OVERLAY */}
-        {/* ===================== */}
         {mobileOpen && (
           <div
             className="fixed inset-0 z-40 bg-black/40 md:hidden"
@@ -61,12 +280,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           />
         )}
 
-        {/* ===================== */}
         {/* SIDEBAR */}
-        {/* ===================== */}
         <aside
           className={cx(
-            "fixed inset-y-0 left-0 z-50 w-[260px] transform bg-[#0f2f26] text-white transition-transform md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-50 w-[280px] transform bg-[#0f2f26] text-white transition-transform md:static md:translate-x-0",
             mobileOpen ? "translate-x-0" : "-translate-x-full"
           )}
         >
@@ -92,7 +309,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 </div>
               </div>
 
-              {/* close mobile */}
               <button
                 onClick={() => setMobileOpen(false)}
                 className="ml-auto rounded-lg p-1 text-white/70 hover:bg-white/10 md:hidden"
@@ -121,20 +337,15 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             </div>
 
             {/* NAV */}
-            <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-              {nav
-                .filter((item) => hasAnyRole(roles, item.roles))
-                .map((item) => {
-                  const active =
-                    pathname === item.href ||
-                    (item.href !== "/admin" &&
-                      pathname.startsWith(item.href));
-
+            <nav className="flex-1 overflow-y-auto p-3 space-y-2">
+              {visibleNav.map((item) => {
+                if (item.type === "link") {
+                  const active = isActivePath(pathname, item.href);
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      onClick={() => setMobileOpen(false)}
+                      onClick={onNavigate}
                       className={cx(
                         "flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition",
                         active
@@ -142,13 +353,82 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                           : "text-white/80 hover:bg-white/10 hover:text-white"
                       )}
                     >
-                      <span>{item.label}</span>
-                      {active && (
-                        <span className="text-xs opacity-70">●</span>
-                      )}
+                      <span className="inline-flex items-center gap-2">
+                        {item.icon}
+                        {item.label}
+                      </span>
+                      {active && <span className="text-xs opacity-70">●</span>}
                     </Link>
                   );
-                })}
+                }
+
+                // group
+                const anyActive = item.children.some((c) =>
+                  isActivePath(pathname, c.href)
+                );
+                const open = !!openGroups[item.id];
+
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-white/10 bg-white/0"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(item.id)}
+                      className={cx(
+                        "w-full flex items-center justify-between rounded-xl px-3 py-2 text-sm font-semibold transition",
+                        anyActive
+                          ? "bg-[#144336] text-white"
+                          : "text-white/85 hover:bg-white/10"
+                      )}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        {item.icon}
+                        {item.label}
+                      </span>
+                      <span className="inline-flex items-center gap-2 text-white/70">
+                        {open ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </span>
+                    </button>
+
+                    {open && (
+                      <div className="px-2 pb-2">
+                        <div className="mt-1 space-y-1">
+                          {item.children.map((c) => {
+                            const active = isActivePath(pathname, c.href);
+                            return (
+                              <Link
+                                key={c.href}
+                                href={c.href}
+                                onClick={onNavigate}
+                                className={cx(
+                                  "flex items-center justify-between rounded-xl px-3 py-2 text-sm transition",
+                                  active
+                                    ? "bg-white/10 text-white"
+                                    : "text-white/75 hover:bg-white/10 hover:text-white"
+                                )}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  {c.icon}
+                                  {c.label}
+                                </span>
+                                {active && (
+                                  <span className="text-xs opacity-70">●</span>
+                                )}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </nav>
 
             {/* Logout */}
@@ -164,9 +444,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           </div>
         </aside>
 
-        {/* ===================== */}
         {/* MAIN */}
-        {/* ===================== */}
         <div className="flex-1 min-w-0 overflow-y-auto">
           {/* Top bar (mobile + back) */}
           <div className="sticky top-0 z-30 flex items-center gap-2 border-b bg-white/80 backdrop-blur px-4 py-3 md:hidden">
