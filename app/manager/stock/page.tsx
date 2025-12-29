@@ -22,23 +22,27 @@ import {
 } from "lucide-react";
 
 type Supplier = { id: string; name: string; isActive: boolean };
-type Product = {
+type Unit = "UNIT" | "KG" | "L";
+
+type Ingredient = {
   id: string;
   name: string;
-  unit: "UNIT" | "KG" | "L";
+  baseUnit: Unit;
   supplierId: string;
   isActive: boolean;
-  minQty: number;
+  stock: { minQty: number };
 };
 
+// ✅ Asumimos que snapshots ya usan ingredientId.
+// Si tu backend todavía usa productId, avisame y te lo ajusto en 2 líneas.
 type Snapshot = {
   id: string;
   dateKey: string;
   supplierId: string;
-  items: { productId: string; qty: number }[];
+  items: { ingredientId: string; qty: number }[];
 };
 
-function unitLabel(u: Product["unit"]) {
+function unitLabel(u: Ingredient["baseUnit"]) {
   if (u === "UNIT") return "Unidad";
   if (u === "KG") return "Kg";
   if (u === "L") return "Litros";
@@ -61,7 +65,11 @@ function toNum(raw: string | undefined) {
 
 function looksForbidden(msg: string) {
   const m = (msg || "").toLowerCase();
-  return m.includes("forbidden") || m.includes("sin permisos") || m.includes("prohibido");
+  return (
+    m.includes("forbidden") ||
+    m.includes("sin permisos") ||
+    m.includes("prohibido")
+  );
 }
 
 export default function StockPage() {
@@ -73,8 +81,10 @@ export default function StockPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [qtyByProductId, setQtyByProductId] = useState<Record<string, string>>({});
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [qtyByIngredientId, setQtyByIngredientId] = useState<
+    Record<string, string>
+  >({});
 
   // States
   const [loadingSuppliers, setLoadingSuppliers] = useState(true);
@@ -109,59 +119,75 @@ export default function StockPage() {
     [suppliers]
   );
 
-  const activeProducts = useMemo(
-    () => products.filter((p) => p.isActive !== false),
-    [products]
+  const activeIngredients = useMemo(
+    () => ingredients.filter((p) => p.isActive !== false),
+    [ingredients]
   );
 
   const stats = useMemo(() => {
-    const belowMin = activeProducts.filter((p) => {
-      const n = toNum(qtyByProductId[p.id]);
-      return p.minQty > 0 && n < p.minQty;
+    const belowMin = activeIngredients.filter((p) => {
+      const n = toNum(qtyByIngredientId[p.id]);
+      const min = p.stock?.minQty ?? 0;
+      return min > 0 && n < min;
     }).length;
 
-    const missing = activeProducts.filter((p) => (qtyByProductId[p.id] ?? "") === "").length;
+    const missing = activeIngredients.filter(
+      (p) => (qtyByIngredientId[p.id] ?? "") === ""
+    ).length;
 
     return {
-      total: activeProducts.length,
+      total: activeIngredients.length,
       belowMin,
       missing,
-      ok: activeProducts.length > 0 && belowMin === 0 && missing === 0,
+      ok:
+        activeIngredients.length > 0 && belowMin === 0 && missing === 0,
     };
-  }, [activeProducts, qtyByProductId]);
+  }, [activeIngredients, qtyByIngredientId]);
 
-  const filteredProducts = useMemo(() => {
+  const filteredIngredients = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return activeProducts
+    return activeIngredients
       .filter((p) => {
-        const raw = qtyByProductId[p.id] ?? "";
+        const raw = qtyByIngredientId[p.id] ?? "";
         const n = raw === "" ? 0 : Number(raw);
-        const isBelowMin = p.minQty > 0 && Number.isFinite(n) && n < p.minQty;
+        const min = p.stock?.minQty ?? 0;
+
+        const isBelowMin = min > 0 && Number.isFinite(n) && n < min;
         const isMissing = raw === "";
 
         if (showOnlyBelowMin && !isBelowMin) return false;
         if (showOnlyMissing && !isMissing) return false;
 
         if (!q) return true;
+
         return (
           p.name.toLowerCase().includes(q) ||
-          unitLabel(p.unit).toLowerCase().includes(q)
+          unitLabel(p.baseUnit).toLowerCase().includes(q)
         );
       })
       // UX: primero faltantes, luego bajo mínimo, luego alfabético
       .sort((a, b) => {
-        const aMissing = (qtyByProductId[a.id] ?? "") === "" ? 1 : 0;
-        const bMissing = (qtyByProductId[b.id] ?? "") === "" ? 1 : 0;
+        const aMissing = (qtyByIngredientId[a.id] ?? "") === "" ? 1 : 0;
+        const bMissing = (qtyByIngredientId[b.id] ?? "") === "" ? 1 : 0;
         if (bMissing !== aMissing) return bMissing - aMissing;
 
-        const aBelow = a.minQty > 0 && toNum(qtyByProductId[a.id]) < a.minQty ? 1 : 0;
-        const bBelow = b.minQty > 0 && toNum(qtyByProductId[b.id]) < b.minQty ? 1 : 0;
+        const aMin = a.stock?.minQty ?? 0;
+        const bMin = b.stock?.minQty ?? 0;
+
+        const aBelow = aMin > 0 && toNum(qtyByIngredientId[a.id]) < aMin ? 1 : 0;
+        const bBelow = bMin > 0 && toNum(qtyByIngredientId[b.id]) < bMin ? 1 : 0;
         if (bBelow !== aBelow) return bBelow - aBelow;
 
         return a.name.localeCompare(b.name);
       });
-  }, [activeProducts, qtyByProductId, query, showOnlyBelowMin, showOnlyMissing]);
+  }, [
+    activeIngredients,
+    qtyByIngredientId,
+    query,
+    showOnlyBelowMin,
+    showOnlyMissing,
+  ]);
 
   // ---------------- Data ----------------
 
@@ -174,7 +200,6 @@ export default function StockPage() {
       // Espera a que exista token (evita el primer render sin auth)
       let token = await getAccessToken();
       if (!token) {
-        // reintento corto, pero sin loop infinito si se desmonta
         await new Promise((r) => setTimeout(r, 150));
         token = await getAccessToken();
       }
@@ -211,12 +236,12 @@ export default function StockPage() {
     setLoadingData(true);
 
     try {
-      const prods = await apiFetchAuthed<Product[]>(
+      const ings = await apiFetchAuthed<Ingredient[]>(
         getAccessToken,
-        `/products?supplierId=${encodeURIComponent(sid)}`
+        `/ingredients?supplierId=${encodeURIComponent(sid)}`
       );
       if (!aliveRef.current) return;
-      setProducts(prods);
+      setIngredients(ings);
 
       const snap = await apiFetchAuthed<Snapshot | null>(
         getAccessToken,
@@ -226,12 +251,15 @@ export default function StockPage() {
       if (!aliveRef.current) return;
 
       const map: Record<string, string> = {};
-      for (const p of prods) map[p.id] = "";
+      for (const p of ings) map[p.id] = "";
+
       if (snap?.items?.length) {
-        for (const it of snap.items) map[it.productId] = String(it.qty ?? "");
+        for (const it of snap.items) {
+          map[it.ingredientId] = String(it.qty ?? "");
+        }
       }
 
-      setQtyByProductId(map);
+      setQtyByIngredientId(map);
       initialHashRef.current = JSON.stringify(map);
       hasLoadedOnceRef.current = true;
     } catch (e: any) {
@@ -259,32 +287,36 @@ export default function StockPage() {
 
   const isDirty = useMemo(() => {
     if (!hasLoadedOnceRef.current) return false;
-    return JSON.stringify(qtyByProductId) !== initialHashRef.current;
-  }, [qtyByProductId]);
+    return JSON.stringify(qtyByIngredientId) !== initialHashRef.current;
+  }, [qtyByIngredientId]);
 
   const isLoading = loadingSuppliers || loadingData;
 
   // ---------------- Actions ----------------
 
-  function setQty(productId: string, v: string) {
+  function setQty(ingredientId: string, v: string) {
     // acepta "" o números con punto
     if (v === "" || /^[0-9]*([.][0-9]*)?$/.test(v)) {
-      setQtyByProductId((prev) => ({ ...prev, [productId]: v }));
+      setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: v }));
     }
   }
 
-  function stepQty(productId: string, step: number) {
-    const raw = qtyByProductId[productId] ?? "";
+  function stepQty(ingredientId: string, step: number) {
+    const raw = qtyByIngredientId[ingredientId] ?? "";
     const current = raw === "" ? 0 : Number(raw);
-    const next = clamp((Number.isFinite(current) ? current : 0) + step, 0, 999999);
-    setQtyByProductId((prev) => ({ ...prev, [productId]: String(next) }));
+    const next = clamp(
+      (Number.isFinite(current) ? current : 0) + step,
+      0,
+      999999
+    );
+    setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: String(next) }));
   }
 
   function clearAll() {
     if (!window.confirm("¿Vaciar todos los valores cargados?")) return;
     const next: Record<string, string> = {};
-    for (const p of products) next[p.id] = "";
-    setQtyByProductId(next);
+    for (const p of ingredients) next[p.id] = "";
+    setQtyByIngredientId(next);
   }
 
   async function save() {
@@ -295,9 +327,9 @@ export default function StockPage() {
     setSaving(true);
 
     try {
-      const items = activeProducts.map((p) => ({
-        productId: p.id,
-        qty: toNum(qtyByProductId[p.id]),
+      const items = activeIngredients.map((p) => ({
+        ingredientId: p.id,
+        qty: toNum(qtyByIngredientId[p.id]),
       }));
 
       await apiFetchAuthed(getAccessToken, "/stock-snapshots", {
@@ -308,7 +340,7 @@ export default function StockPage() {
 
       if (!aliveRef.current) return;
       setOkMsg("Guardado ✔");
-      initialHashRef.current = JSON.stringify(qtyByProductId);
+      initialHashRef.current = JSON.stringify(qtyByIngredientId);
     } catch (e: any) {
       const msg = String(e?.message || "Error guardando");
       if (looksForbidden(msg)) {
@@ -357,7 +389,9 @@ export default function StockPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-2xl font-bold text-zinc-900">Conteo diario de stock</h1>
+                  <h1 className="text-2xl font-bold text-zinc-900">
+                    Conteo diario de stock
+                  </h1>
                   {statusPill}
                   {isDirty && !isLoading && (
                     <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700">
@@ -371,8 +405,13 @@ export default function StockPage() {
                   {!isLoading && (
                     <span className="text-zinc-600">
                       Total: <b>{stats.total}</b> · Bajo mínimo:{" "}
-                      <b className={stats.belowMin ? "text-amber-700" : ""}>{stats.belowMin}</b> · Sin cargar:{" "}
-                      <b className={stats.missing ? "text-amber-700" : ""}>{stats.missing}</b>
+                      <b className={stats.belowMin ? "text-amber-700" : ""}>
+                        {stats.belowMin}
+                      </b>{" "}
+                      · Sin cargar:{" "}
+                      <b className={stats.missing ? "text-amber-700" : ""}>
+                        {stats.missing}
+                      </b>
                     </span>
                   )}
                 </div>
@@ -397,13 +436,17 @@ export default function StockPage() {
                 <Button
                   variant="secondary"
                   onClick={clearAll}
-                  disabled={saving || isLoading || products.length === 0}
+                  disabled={saving || isLoading || ingredients.length === 0}
                 >
                   <XCircle className="h-4 w-4" />
                   Vaciar
                 </Button>
 
-                <Button onClick={save} loading={saving} disabled={saving || isLoading || !supplierId}>
+                <Button
+                  onClick={save}
+                  loading={saving}
+                  disabled={saving || isLoading || !supplierId}
+                >
                   Guardar
                 </Button>
               </div>
@@ -454,7 +497,7 @@ export default function StockPage() {
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <Field label="Buscar producto">
+                <Field label="Buscar ingrediente">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <Input
@@ -502,7 +545,7 @@ export default function StockPage() {
           {/* Tabla */}
           <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <div className="border-b border-zinc-100 px-5 py-4">
-              <h2 className="text-lg font-semibold text-zinc-900">Productos</h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Ingredientes</h2>
               <p className="mt-1 text-sm text-zinc-500">
                 Tip: podés usar <b>+</b>/<b>-</b> para ajustar rápido. Si el stock está bajo mínimo se marca en ámbar.
               </p>
@@ -513,7 +556,7 @@ export default function StockPage() {
                 <thead className="bg-zinc-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Producto
+                      Ingrediente
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
                       Unidad
@@ -534,25 +577,26 @@ export default function StockPage() {
                   {isLoading && (
                     <tr>
                       <td colSpan={5} className="px-4 py-8 text-sm text-zinc-500">
-                        Cargando productos…
+                        Cargando ingredientes…
                       </td>
                     </tr>
                   )}
 
-                  {!isLoading && filteredProducts.length === 0 && (
+                  {!isLoading && filteredIngredients.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-4 py-10 text-sm text-zinc-500">
-                        No hay productos para mostrar.
+                        No hay ingredientes para mostrar.
                       </td>
                     </tr>
                   )}
 
                   {!isLoading &&
-                    filteredProducts.map((p, idx) => {
-                      const raw = qtyByProductId[p.id] ?? "";
+                    filteredIngredients.map((p, idx) => {
+                      const raw = qtyByIngredientId[p.id] ?? "";
                       const n = toNum(raw);
                       const isMissing = raw === "";
-                      const isBelowMin = p.minQty > 0 && n < p.minQty;
+                      const min = p.stock?.minQty ?? 0;
+                      const isBelowMin = min > 0 && n < min;
 
                       return (
                         <tr
@@ -570,17 +614,17 @@ export default function StockPage() {
                             )}
                             {isBelowMin && !isMissing && (
                               <div className="mt-0.5 text-xs text-amber-700">
-                                Bajo mínimo ({p.minQty})
+                                Bajo mínimo ({min})
                               </div>
                             )}
                           </td>
 
                           <td className={cn("px-4 text-zinc-700", compact ? "py-2" : "py-3")}>
-                            {unitLabel(p.unit)}
+                            {unitLabel(p.baseUnit)}
                           </td>
 
                           <td className={cn("px-4 text-zinc-700", compact ? "py-2" : "py-3")}>
-                            {p.minQty ?? 0}
+                            {min}
                           </td>
 
                           <td className={cn("px-4", compact ? "py-2" : "py-3")}>
@@ -604,8 +648,7 @@ export default function StockPage() {
                                   stepQty(p.id, -1);
                                 }
                                 if (e.key === "Enter") {
-                                  // focus al próximo input
-                                  const nextId = filteredProducts[idx + 1]?.id;
+                                  const nextId = filteredIngredients[idx + 1]?.id;
                                   if (nextId) {
                                     const el = document.querySelector<HTMLInputElement>(
                                       `input[data-stock="${nextId}"]`
@@ -654,7 +697,8 @@ export default function StockPage() {
             </div>
 
             <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
-              Mostrando <b>{filteredProducts.length}</b> de <b>{activeProducts.length}</b> productos.
+              Mostrando <b>{filteredIngredients.length}</b> de{" "}
+              <b>{activeIngredients.length}</b> ingredientes.
             </div>
           </div>
         </div>

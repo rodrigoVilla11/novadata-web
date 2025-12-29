@@ -42,7 +42,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     { href: "/admin", label: "Dashboard", roles: ["ADMIN", "MANAGER"] },
     { href: "/admin/users", label: "Usuarios", roles: ["ADMIN"] },
     { href: "/admin/employees", label: "Empleados", roles: ["ADMIN"] },
-    { href: "/admin/products", label: "Productos", roles: ["ADMIN"] },
+    { href: "/admin/ingredients", label: "Ingredientes", roles: ["ADMIN"] },
     { href: "/admin/tasks", label: "Tareas", roles: ["ADMIN"] },
     { href: "/admin/suppliers", label: "Proveedores", roles: ["ADMIN"] },
     { href: "/admin/attendance", label: "Asistencia", roles: ["ADMIN"] },

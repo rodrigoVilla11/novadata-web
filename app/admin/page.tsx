@@ -144,9 +144,9 @@ export default function AdminHomePage() {
         icon: <Truck className="h-5 w-5" />,
       },
       {
-        title: "Productos",
-        desc: "Crear, editar y eliminar productos.",
-        href: "/admin/products",
+        title: "Ingredientes",
+        desc: "Crear, editar y eliminar ingredientes.",
+        href: "/admin/ingredients",
         icon: <Package className="h-5 w-5" />,
       },
       {
