@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
@@ -19,7 +19,6 @@ import {
   Wallet,
   ArrowDownCircle,
   ArrowUpCircle,
-  BadgeDollarSign,
 } from "lucide-react";
 
 /* ============================================================================
@@ -135,7 +134,7 @@ type CashMovement = {
 type FinanceCategory = {
   id: string;
   name: string;
-  type?: string; // optional
+  type?: string;
   isActive?: boolean;
 };
 
@@ -204,15 +203,9 @@ export default function AdminCashPage() {
     [categories]
   );
 
-  const totalsUi = useMemo(() => {
-    if (!summary) return null;
-    return summary.totals;
-  }, [summary]);
-
   // ---------------- data loaders ----------------
 
   async function loadCategories() {
-    // Ajustá la ruta si tu Finance usa otra
     const cats = await apiFetchAuthed<FinanceCategory[]>(
       getAccessToken,
       "/finance/categories"
@@ -220,10 +213,19 @@ export default function AdminCashPage() {
     setCategories(cats);
   }
 
-  async function loadDay() {
+  /**
+   * IMPORTANTE:
+   * - GET /cash/day puede devolver null si no existe.
+   * - Para POS/admin queremos que exista siempre: usamos get-or-create.
+   */
+  async function ensureDay(): Promise<CashDay> {
     const d = await apiFetchAuthed<CashDay>(
       getAccessToken,
-      `/cash/day?dateKey=${encodeURIComponent(dateKey)}`
+      "/cash/day/get-or-create",
+      {
+        method: "POST",
+        body: JSON.stringify({ dateKey }),
+      }
     );
     setDay(d);
     return d;
@@ -232,7 +234,7 @@ export default function AdminCashPage() {
   async function loadMovements(cashDayId: string) {
     const rows = await apiFetchAuthed<CashMovement[]>(
       getAccessToken,
-      `/cash/movements?cashDayId=${encodeURIComponent(cashDayId)}`
+      `/cash/movements/${encodeURIComponent(cashDayId)}`
     );
     setMovements(rows);
   }
@@ -240,10 +242,9 @@ export default function AdminCashPage() {
   async function loadSummary() {
     const s = await apiFetchAuthed<CashSummary>(
       getAccessToken,
-      `/cash/day/summary?dateKey=${encodeURIComponent(dateKey)}`
+      `/cash/summary?dateKey=${encodeURIComponent(dateKey)}`
     );
     setSummary(s);
-    // sincronizamos day por si recalculó expectedCash
     setDay(s.day);
   }
 
@@ -255,7 +256,7 @@ export default function AdminCashPage() {
     try {
       await loadCategories();
 
-      const d = await loadDay();
+      const d = await ensureDay();
       await Promise.all([loadMovements(d.id), loadSummary()]);
 
       setOk("Datos actualizados ✔");
@@ -274,7 +275,6 @@ export default function AdminCashPage() {
   }, []);
 
   useEffect(() => {
-    // cada vez que cambia el día
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateKey]);
@@ -284,7 +284,7 @@ export default function AdminCashPage() {
   async function refresh() {
     setBusy(true);
     try {
-      const d = await loadDay();
+      const d = await ensureDay();
       await Promise.all([loadMovements(d.id), loadSummary()]);
     } catch (e: any) {
       setErr(String(e?.message || "Error actualizando"));
@@ -294,9 +294,12 @@ export default function AdminCashPage() {
   }
 
   async function openCashDay() {
-    // opcional: apertura explícita para setear openingCash
     if (!day) return;
-    const opening = window.prompt("Efectivo inicial (apertura)", String(day.openingCash ?? 0));
+
+    const opening = window.prompt(
+      "Efectivo inicial (apertura)",
+      String(day.openingCash ?? 0)
+    );
     if (opening == null) return;
 
     const n = Number(opening);
@@ -339,7 +342,7 @@ export default function AdminCashPage() {
     setErr(null);
 
     try {
-      await apiFetchAuthed(getAccessToken, "/cash/movements", {
+      await apiFetchAuthed(getAccessToken, "/cash/movement", {
         method: "POST",
         body: JSON.stringify({
           cashDayId: day.id,
@@ -368,14 +371,19 @@ export default function AdminCashPage() {
   }
 
   async function voidMovement(m: CashMovement) {
-    if (!window.confirm(`¿Anular movimiento?\n\n${m.type} ${moneyARS(m.amount)} (${m.method})`)) return;
+    if (
+      !window.confirm(
+        `¿Anular movimiento?\n\n${m.type} ${moneyARS(m.amount)} (${m.method})`
+      )
+    )
+      return;
 
     const reason = window.prompt("Razón de anulación (opcional)", m.voidReason || "");
     setBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(getAccessToken, `/cash/movements/${m.id}/void`, {
-        method: "PATCH",
+      await apiFetchAuthed(getAccessToken, `/cash/movement/${m.id}/void`, {
+        method: "POST",
         body: JSON.stringify({ reason: reason ?? "" }),
       });
       await refresh();
@@ -397,6 +405,7 @@ export default function AdminCashPage() {
 
     const raw = countedCash.trim();
     const counted = raw === "" ? null : Number(raw);
+
     if (!adminOverride) {
       if (counted == null || !Number.isFinite(counted) || counted < 0) {
         setErr("Ingresá el efectivo contado (>= 0) o activá override admin.");
@@ -551,7 +560,9 @@ export default function AdminCashPage() {
                   <Field label="Efectivo contado (para cerrar)">
                     <Input
                       value={countedCash}
-                      onChange={(e) => isValidNumberDraft(e.target.value) && setCountedCash(e.target.value)}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setCountedCash(e.target.value)
+                      }
                       placeholder="0"
                       disabled={busy || loading}
                     />
@@ -598,7 +609,10 @@ export default function AdminCashPage() {
               ) : (
                 <div className="space-y-3">
                   {summary.byMethod.map((m) => (
-                    <div key={m.method} className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
+                    <div
+                      key={m.method}
+                      className="rounded-2xl border border-zinc-200 bg-white px-3 py-2"
+                    >
                       <div className="flex items-center justify-between text-sm">
                         <b className="text-zinc-900">{m.method}</b>
                         <span className="text-zinc-600">
@@ -626,14 +640,22 @@ export default function AdminCashPage() {
               ) : (
                 <div className="space-y-2 max-h-[320px] overflow-auto pr-1">
                   {summary.byCategory.map((c) => (
-                    <div key={c.categoryId} className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm">
+                    <div
+                      key={c.categoryId}
+                      className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                    >
                       <div className="min-w-0">
                         <div className="font-semibold text-zinc-900 truncate">{c.name}</div>
                         <div className="text-xs text-zinc-500">
                           +{moneyARS(c.income)} / -{moneyARS(c.expense)}
                         </div>
                       </div>
-                      <div className={cn("font-semibold", c.net >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                      <div
+                        className={cn(
+                          "font-semibold",
+                          c.net >= 0 ? "text-emerald-700" : "text-rose-700"
+                        )}
+                      >
                         {moneyARS(c.net)}
                       </div>
                     </div>
@@ -646,18 +668,29 @@ export default function AdminCashPage() {
 
         {/* Create movement */}
         <Card>
-          <CardHeader title="Nuevo movimiento" subtitle="Ingreso / Egreso con método y categoría" />
+          <CardHeader
+            title="Nuevo movimiento"
+            subtitle="Ingreso / Egreso con método y categoría"
+          />
           <CardBody>
             <div className="grid gap-4 md:grid-cols-6">
               <Field label="Tipo">
-                <Select value={type} onChange={(e) => setType(e.target.value as any)} disabled={!canWrite || busy}>
+                <Select
+                  value={type}
+                  onChange={(e) => setType(e.target.value as any)}
+                  disabled={!canWrite || busy}
+                >
                   <option value="INCOME">Ingreso</option>
                   <option value="EXPENSE">Egreso</option>
                 </Select>
               </Field>
 
               <Field label="Método">
-                <Select value={method} onChange={(e) => setMethod(e.target.value as any)} disabled={!canWrite || busy}>
+                <Select
+                  value={method}
+                  onChange={(e) => setMethod(e.target.value as any)}
+                  disabled={!canWrite || busy}
+                >
                   <option value="CASH">Efectivo</option>
                   <option value="TRANSFER">Transferencia</option>
                   <option value="CARD">Tarjeta</option>
@@ -668,7 +701,9 @@ export default function AdminCashPage() {
               <Field label="Monto">
                 <Input
                   value={amount}
-                  onChange={(e) => isValidNumberDraft(e.target.value) && setAmount(e.target.value)}
+                  onChange={(e) =>
+                    isValidNumberDraft(e.target.value) && setAmount(e.target.value)
+                  }
                   disabled={!canWrite || busy}
                 />
               </Field>
@@ -736,13 +771,27 @@ export default function AdminCashPage() {
             <table className="min-w-full">
               <thead className="bg-zinc-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Fecha</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Tipo</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Método</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Monto</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Categoría</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Concepto</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Acciones</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Fecha
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Tipo
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Método
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Monto
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Categoría
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Concepto
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
 
@@ -767,12 +816,15 @@ export default function AdminCashPage() {
                   movements.map((m) => {
                     const isIncome = m.type === "INCOME";
                     const catName =
-                      (summary?.byCategory.find((c) => c.categoryId === m.categoryId)?.name ||
-                        activeCategories.find((c) => c.id === m.categoryId)?.name ||
-                        "—");
+                      summary?.byCategory.find((c) => c.categoryId === m.categoryId)?.name ||
+                      activeCategories.find((c) => c.id === m.categoryId)?.name ||
+                      "—";
 
                     return (
-                      <tr key={m.id} className={cn(m.voided ? "opacity-60" : "hover:bg-zinc-50")}>
+                      <tr
+                        key={m.id}
+                        className={cn(m.voided ? "opacity-60" : "hover:bg-zinc-50")}
+                      >
                         <td className="px-4 py-3 text-sm text-zinc-600">
                           {new Date(m.createdAt).toLocaleString("es-AR")}
                         </td>
@@ -793,6 +845,7 @@ export default function AdminCashPage() {
                             )}
                             {isIncome ? "INGRESO" : "EGRESO"}
                           </span>
+
                           {m.voided && (
                             <div className="mt-1 text-xs text-zinc-500 inline-flex items-center gap-1">
                               <XCircle className="h-3.5 w-3.5" />
@@ -804,12 +857,19 @@ export default function AdminCashPage() {
                         <td className="px-4 py-3 text-sm text-zinc-700">{m.method}</td>
 
                         <td className="px-4 py-3 text-sm">
-                          <span className={cn("font-semibold", isIncome ? "text-emerald-700" : "text-rose-700")}>
+                          <span
+                            className={cn(
+                              "font-semibold",
+                              isIncome ? "text-emerald-700" : "text-rose-700"
+                            )}
+                          >
                             {isIncome ? "+" : "-"} {moneyARS(m.amount)}
                           </span>
                         </td>
 
-                        <td className="px-4 py-3 text-sm text-zinc-700">{m.categoryId ? catName : "—"}</td>
+                        <td className="px-4 py-3 text-sm text-zinc-700">
+                          {m.categoryId ? catName : "—"}
+                        </td>
 
                         <td className="px-4 py-3 text-sm text-zinc-700">
                           <div className="font-medium text-zinc-900">{m.concept || "—"}</div>
@@ -817,17 +877,15 @@ export default function AdminCashPage() {
                         </td>
 
                         <td className="px-4 py-3 text-sm">
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="danger"
-                              disabled={m.voided || busy || (!canWrite && !isAdmin)}
-                              onClick={() => voidMovement(m)}
-                              title={m.voided ? "Ya anulado" : "Anular"}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Anular
-                            </Button>
-                          </div>
+                          <Button
+                            variant="danger"
+                            disabled={m.voided || busy || (!canWrite && !isAdmin)}
+                            onClick={() => voidMovement(m)}
+                            title={m.voided ? "Ya anulado" : "Anular"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Anular
+                          </Button>
                         </td>
                       </tr>
                     );
