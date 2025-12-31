@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo } from "react";
 import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { todayKeyArgentina } from "@/lib/adminCash/cashUtils";
@@ -14,21 +14,22 @@ import OpenCashModal from "@/components/admin/cash/OpenCashModal";
 import CloseCashModal from "@/components/admin/cash/CloseCashModal";
 import VoidMovementModal from "@/components/admin/cash/VoidMovementModal";
 
-export default function AdminCashPage() {
+
+export default function CashierCashPage() {
   const { getAccessToken, user } = useAuth();
   const roles = (user?.roles ?? []).map((r: any) => String(r).toUpperCase());
-  const isAdmin = roles.includes("ADMIN");
 
-  const [dateKey, setDateKey] = useState(todayKeyArgentina());
+  const isAdmin = roles.includes("ADMIN"); // por si un admin entra a esta vista
+  const dateKey = useMemo(() => todayKeyArgentina(), []);
 
   const cash = useCashDay({ dateKey, getAccessToken, isAdmin });
 
   return (
-    <AdminProtected>
+    <AdminProtected allow={["ADMIN", "MANAGER", "CASHIER"]}>
       <div className="space-y-6">
         <CashHeader
           dateKey={dateKey}
-          setDateKey={setDateKey}
+          setDateKey={() => {}}
           day={cash.day}
           summary={cash.summary}
           loading={cash.loading}
@@ -38,6 +39,8 @@ export default function AdminCashPage() {
           onRefresh={cash.refresh}
           onOpenOpeningModal={cash.openOpeningModal}
           onOpenClose={cash.openClose}
+          hideDatePicker
+          dateLabel="Hoy"
         />
 
         <CashSummaryCards day={cash.day} summary={cash.summary} />
@@ -113,6 +116,7 @@ export default function AdminCashPage() {
         setCloseNote={cash.setCloseNote}
         onClose={() => !cash.busy && cash.setOpenCloseModal(false)}
         onConfirm={cash.confirmCloseCashDay}
+        showOverride={false} // 👈 CASHIER: NO override
       />
 
       <VoidMovementModal

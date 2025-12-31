@@ -365,16 +365,15 @@ export const financeApi = baseApi.injectEndpoints({
       invalidatesTags: ["FinanceCategories"],
     }),
     updateFinanceMovement: builder.mutation<
-      any, // o FinanceMovement
-      { id: string; body: UpdateFinanceMovementDto }
+      any,
+      { id: string } & Record<string, any>
     >({
-      query: ({ id, body }) => ({
+      query: ({ id, ...body }) => ({
         url: `/finance/movements/${id}`,
         method: "PATCH",
-        body,
+        body, // ✅ ahora siempre manda el body correcto
       }),
-      // si usás tags:
-      invalidatesTags: ["FinanceMovements", "FinanceStats"],
+      invalidatesTags: ["FinanceMovements"],
     }),
   }),
   overrideExisting: false,

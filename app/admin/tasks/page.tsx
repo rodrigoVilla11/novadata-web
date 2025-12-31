@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
@@ -19,6 +19,9 @@ import {
   AlertTriangle,
   ClipboardList,
   Tag,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 
 type TaskRow = {
@@ -77,12 +80,48 @@ function Notice({
   );
 }
 
+function SkeletonRow() {
+  return (
+    <tr className="animate-pulse">
+      <td className="px-4 py-3">
+        <div className="h-4 w-44 rounded bg-zinc-100" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 w-28 rounded bg-zinc-100" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-6 w-20 rounded-full bg-zinc-100" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-10 w-56 rounded-xl bg-zinc-100" />
+      </td>
+    </tr>
+  );
+}
+
+type SortKey = "name" | "area" | "isActive";
+type SortDir = "asc" | "desc";
+
+function sortLabel(k: SortKey) {
+  if (k === "name") return "Nombre";
+  if (k === "area") return "Área";
+  return "Estado";
+}
+
+function cmpStr(a: string, b: string) {
+  return a.localeCompare(b, "es", { sensitivity: "base" });
+}
+
 export default function AdminTasksPage() {
   const { getAccessToken } = useAuth();
 
   const [items, setItems] = useState<TaskRow[]>([]);
+  const [qRaw, setQRaw] = useState("");
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
+
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -91,7 +130,7 @@ export default function AdminTasksPage() {
   const [busy, setBusy] = useState(false);
 
   // create form (colapsable)
-  const [createOpen, setCreateOpen] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [area, setArea] = useState("");
 
@@ -102,38 +141,25 @@ export default function AdminTasksPage() {
 
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    let base = items;
-    if (onlyActive) base = base.filter((t) => t.isActive);
-    if (!qq) return base;
-    return base.filter(
-      (t) =>
-        t.name.toLowerCase().includes(qq) ||
-        (t.area || "").toLowerCase().includes(qq)
-    );
-  }, [items, q, onlyActive]);
-
-  const totals = useMemo(() => {
-    const total = items.length;
-    const active = items.filter((t) => t.isActive).length;
-    const inactive = total - active;
-    return { total, active, inactive };
-  }, [items]);
-
   function flashOk(msg: string) {
     setOk(msg);
     window.setTimeout(() => setOk(null), 1500);
   }
 
-  async function load() {
+  // Debounce búsqueda
+  useEffect(() => {
+    const t = window.setTimeout(() => setQ(qRaw.trim()), 150);
+    return () => window.clearTimeout(t);
+  }, [qRaw]);
+
+  async function load(opts?: { silentOk?: boolean }) {
     setError(null);
-    setOk(null);
+    if (!opts?.silentOk) setOk(null);
     setLoadingList(true);
     try {
       const data = await apiFetchAuthed<TaskRow[]>(getAccessToken, "/tasks");
-      setItems(data);
-      flashOk("Datos actualizados ✔");
+      setItems(Array.isArray(data) ? data : []);
+      if (!opts?.silentOk) flashOk("Datos actualizados ✔");
     } catch (e: any) {
       setError(e?.message || "Error cargando tareas");
     } finally {
@@ -142,34 +168,71 @@ export default function AdminTasksPage() {
   }
 
   useEffect(() => {
-    load();
+    load({ silentOk: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function createTask() {
-    if (!name.trim()) return;
+  // Atajos: "/" enfoca buscar, "Esc" limpia/cancela
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as any)?.tagName?.toLowerCase?.();
+      const inInput =
+        tag === "input" || tag === "textarea" || (e.target as any)?.isContentEditable;
 
-    setError(null);
-    setOk(null);
-    setBusy(true);
-    try {
-      await apiFetchAuthed(getAccessToken, "/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          name: name.trim(),
-          area: area.trim() ? area.trim() : null,
-        }),
-      });
-
-      setName("");
-      setArea("");
-      flashOk("Tarea creada ✔");
-      await load();
-    } catch (e: any) {
-      setError(e?.message || "Error creando tarea");
-    } finally {
-      setBusy(false);
+      if (!inInput && e.key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (e.key === "Escape") {
+        // si estaba editando, cancela; si no, limpia búsqueda
+        if (editingId) cancelEdit();
+        else if (qRaw) setQRaw("");
+      }
     }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editingId, qRaw]);
+
+  const totals = useMemo(() => {
+    const total = items.length;
+    const active = items.filter((t) => t.isActive).length;
+    const inactive = total - active;
+    return { total, active, inactive };
+  }, [items]);
+
+  const filteredSorted = useMemo(() => {
+    const qq = q.toLowerCase();
+    let base = items;
+
+    if (onlyActive) base = base.filter((t) => t.isActive);
+
+    if (qq) {
+      base = base.filter(
+        (t) =>
+          t.name.toLowerCase().includes(qq) ||
+          (t.area || "").toLowerCase().includes(qq)
+      );
+    }
+
+    const dir = sortDir === "asc" ? 1 : -1;
+
+    const sorted = [...base].sort((a, b) => {
+      if (sortKey === "name") return dir * cmpStr(a.name, b.name);
+      if (sortKey === "area") return dir * cmpStr(a.area ?? "", b.area ?? "");
+      // estado: activas primero si asc
+      return dir * (Number(b.isActive) - Number(a.isActive));
+    });
+
+    return sorted;
+  }, [items, onlyActive, q, sortKey, sortDir]);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir("asc");
+      return;
+    }
+    setSortDir((d) => (d === "asc" ? "desc" : "asc"));
   }
 
   function startEdit(t: TaskRow) {
@@ -184,25 +247,78 @@ export default function AdminTasksPage() {
     setEditArea("");
   }
 
-  async function saveEdit(id: string) {
-    if (!editName.trim()) return;
+  async function createTask() {
+    const n = name.trim();
+    if (!n) return;
 
     setError(null);
     setOk(null);
     setBusy(true);
+
+    // optimistic: agrega fila temporal
+    const tempId = `tmp_${Date.now()}`;
+    const optimistic: TaskRow = {
+      id: tempId,
+      name: n,
+      area: area.trim() ? area.trim() : null,
+      isActive: true,
+    };
+    setItems((prev) => [optimistic, ...prev]);
+
+    try {
+      await apiFetchAuthed(getAccessToken, "/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          name: n,
+          area: area.trim() ? area.trim() : null,
+        }),
+      });
+
+      setName("");
+      setArea("");
+      flashOk("Tarea creada ✔");
+      await load({ silentOk: true });
+    } catch (e: any) {
+      // rollback optimistic
+      setItems((prev) => prev.filter((x) => x.id !== tempId));
+      setError(e?.message || "Error creando tarea");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit(id: string) {
+    const n = editName.trim();
+    if (!n) return;
+
+    setError(null);
+    setOk(null);
+    setBusy(true);
+
+    // optimistic update
+    const prev = items;
+    setItems((curr) =>
+      curr.map((t) =>
+        t.id === id
+          ? { ...t, name: n, area: editArea.trim() ? editArea.trim() : null }
+          : t
+      )
+    );
+
     try {
       await apiFetchAuthed(getAccessToken, `/tasks/${id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          name: editName.trim(),
+          name: n,
           area: editArea.trim() ? editArea.trim() : null,
         }),
       });
 
       cancelEdit();
       flashOk("Tarea actualizada ✔");
-      await load();
+      await load({ silentOk: true });
     } catch (e: any) {
+      setItems(prev); // rollback
       setError(e?.message || "Error actualizando tarea");
     } finally {
       setBusy(false);
@@ -219,6 +335,11 @@ export default function AdminTasksPage() {
     setError(null);
     setOk(null);
     setBusy(true);
+
+    // optimistic
+    const prev = items;
+    setItems((curr) => curr.map((x) => (x.id === t.id ? { ...x, isActive: next } : x)));
+
     try {
       await apiFetchAuthed(getAccessToken, `/tasks/${t.id}/active`, {
         method: "PATCH",
@@ -226,13 +347,16 @@ export default function AdminTasksPage() {
       });
 
       flashOk(next ? "Tarea reactivada ✔" : "Tarea desactivada ✔");
-      await load();
+      await load({ silentOk: true });
     } catch (e: any) {
+      setItems(prev); // rollback
       setError(e?.message || "Error cambiando estado");
     } finally {
       setBusy(false);
     }
   }
+
+  const showEmpty = !loadingList && filteredSorted.length === 0;
 
   return (
     <AdminProtected>
@@ -259,24 +383,29 @@ export default function AdminTasksPage() {
                   Inactivas: {totals.inactive}
                 </span>
               </div>
+
+              <div className="mt-2 text-xs text-zinc-400">
+                Tip: presioná <span className="font-semibold">/</span> para buscar ·{" "}
+                <span className="font-semibold">Esc</span> para limpiar/cancelar
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
-                onClick={load}
+                onClick={() => load()}
                 disabled={busy}
                 loading={loadingList}
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-  
+                  Actualizar
                 </span>
               </Button>
 
               <button
                 type="button"
-                title="Buscar"
+                title="Buscar (/) "
                 onClick={() => searchRef.current?.focus()}
                 disabled={loadingList}
                 className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-60"
@@ -296,15 +425,25 @@ export default function AdminTasksPage() {
 
         {/* Filters */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-center">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
+                value={qRaw}
+                onChange={(e) => setQRaw(e.target.value)}
                 placeholder="Buscar por nombre o área…"
                 className="pl-9"
               />
+              {qRaw && (
+                <button
+                  type="button"
+                  onClick={() => setQRaw("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-zinc-500 hover:bg-zinc-100"
+                  title="Limpiar"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
             <button
@@ -320,6 +459,33 @@ export default function AdminTasksPage() {
               <Tag className="h-4 w-4" />
               {onlyActive ? "Solo activas" : "Todas"}
             </button>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-zinc-500">Orden:</span>
+              <button
+                type="button"
+                onClick={() => toggleSort(sortKey)}
+                className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 inline-flex items-center gap-2"
+                title="Cambiar asc/desc"
+              >
+                {sortLabel(sortKey)}
+                {sortDir === "asc" ? (
+                  <ArrowUp className="h-4 w-4" />
+                ) : (
+                  <ArrowDown className="h-4 w-4" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => toggleSort(sortKey === "name" ? "area" : sortKey === "area" ? "isActive" : "name")}
+                className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 inline-flex items-center gap-2"
+                title="Cambiar criterio"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                Criterio
+              </button>
+            </div>
           </div>
         </div>
 
@@ -405,141 +571,193 @@ export default function AdminTasksPage() {
           <div className="border-b border-zinc-100 px-5 py-4">
             <h2 className="text-lg font-semibold text-zinc-900">Listado</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {filtered.length} tarea(s). Editá inline y activá/desactivá.
+              {filteredSorted.length} tarea(s). Editá inline y activá/desactivá.
             </p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                    Nombre
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                    Área
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                    Estado
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-zinc-100">
-                {loadingList && (
+          {showEmpty ? (
+            <div className="px-5 py-10">
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6">
+                <div className="text-base font-semibold text-zinc-900">
+                  No hay resultados
+                </div>
+                <div className="mt-1 text-sm text-zinc-600">
+                  Probá limpiar filtros o crear una nueva tarea.
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => {
+                      setCreateOpen(true);
+                      window.setTimeout(() => {
+                        // intenta enfocar nombre (sin ref, pero al menos abre)
+                      }, 0);
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Plus className="h-4 w-4" />
+                      Crear tarea
+                    </span>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setQRaw("");
+                      setOnlyActive(false);
+                      setSortKey("name");
+                      setSortDir("asc");
+                    }}
+                  >
+                    Reset filtros
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead className="bg-zinc-50">
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
-                      Cargando…
-                    </td>
+                    <th
+                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 cursor-pointer select-none"
+                      onClick={() => toggleSort("name")}
+                      title="Ordenar por nombre"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        Nombre {sortKey === "name" && (sortDir === "asc" ? "↑" : "↓")}
+                      </span>
+                    </th>
+                    <th
+                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 cursor-pointer select-none"
+                      onClick={() => toggleSort("area")}
+                      title="Ordenar por área"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        Área {sortKey === "area" && (sortDir === "asc" ? "↑" : "↓")}
+                      </span>
+                    </th>
+                    <th
+                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 cursor-pointer select-none"
+                      onClick={() => toggleSort("isActive")}
+                      title="Ordenar por estado"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        Estado{" "}
+                        {sortKey === "isActive" && (sortDir === "asc" ? "↑" : "↓")}
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Acciones
+                    </th>
                   </tr>
-                )}
+                </thead>
 
-                {!loadingList && filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
-                      No hay tareas.
-                    </td>
-                  </tr>
-                )}
+                <tbody className="divide-y divide-zinc-100">
+                  {loadingList && (
+                    <>
+                      <SkeletonRow />
+                      <SkeletonRow />
+                      <SkeletonRow />
+                      <SkeletonRow />
+                    </>
+                  )}
 
-                {!loadingList &&
-                  filtered.map((t) => {
-                    const isEditing = editingId === t.id;
+                  {!loadingList &&
+                    filteredSorted.map((t) => {
+                      const isEditing = editingId === t.id;
 
-                    return (
-                      <tr key={t.id} className="hover:bg-zinc-50/60">
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <Input
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                            />
-                          ) : (
-                            <div className="text-sm font-semibold text-zinc-900">
-                              {t.name}
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <Input
-                              value={editArea}
-                              onChange={(e) => setEditArea(e.target.value)}
-                            />
-                          ) : (
-                            <div className="text-sm text-zinc-700">
-                              {t.area ?? "—"}
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <StatusPill active={t.isActive} />
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {!isEditing ? (
-                              <>
-                                <Button
-                                  variant="secondary"
-                                  disabled={busy}
-                                  onClick={() => startEdit(t)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Pencil className="h-4 w-4" />
-                                    Editar
-                                  </span>
-                                </Button>
-
-                                <Button
-                                  variant={t.isActive ? "danger" : "secondary"}
-                                  disabled={busy}
-                                  onClick={() => toggleActive(t)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Power className="h-4 w-4" />
-                                    {t.isActive ? "Desactivar" : "Reactivar"}
-                                  </span>
-                                </Button>
-                              </>
+                      return (
+                        <tr key={t.id} className="hover:bg-zinc-50/60">
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <Input
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                autoFocus
+                              />
                             ) : (
-                              <>
-                                <Button
-                                  variant="secondary"
-                                  disabled={busy}
-                                  onClick={cancelEdit}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <X className="h-4 w-4" />
-                                    Cancelar
-                                  </span>
-                                </Button>
-
-                                <Button
-                                  disabled={busy || !editName.trim()}
-                                  loading={busy}
-                                  onClick={() => saveEdit(t.id)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Save className="h-4 w-4" />
-                                    Guardar
-                                  </span>
-                                </Button>
-                              </>
+                              <div className="text-sm font-semibold text-zinc-900">
+                                {t.name}
+                              </div>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
+                          </td>
+
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <Input
+                                value={editArea}
+                                onChange={(e) => setEditArea(e.target.value)}
+                              />
+                            ) : (
+                              <div className="text-sm text-zinc-700">
+                                {t.area ?? "—"}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <StatusPill active={t.isActive} />
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {!isEditing ? (
+                                <>
+                                  <Button
+                                    variant="secondary"
+                                    disabled={busy}
+                                    onClick={() => startEdit(t)}
+                                  >
+                                    <span className="inline-flex items-center gap-2">
+                                      <Pencil className="h-4 w-4" />
+                                      Editar
+                                    </span>
+                                  </Button>
+
+                                  <Button
+                                    variant={t.isActive ? "danger" : "secondary"}
+                                    disabled={busy}
+                                    onClick={() => toggleActive(t)}
+                                  >
+                                    <span className="inline-flex items-center gap-2">
+                                      <Power className="h-4 w-4" />
+                                      {t.isActive ? "Desactivar" : "Reactivar"}
+                                    </span>
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="secondary"
+                                    disabled={busy}
+                                    onClick={cancelEdit}
+                                  >
+                                    <span className="inline-flex items-center gap-2">
+                                      <X className="h-4 w-4" />
+                                      Cancelar
+                                    </span>
+                                  </Button>
+
+                                  <Button
+                                    disabled={busy || !editName.trim()}
+                                    loading={busy}
+                                    onClick={() => saveEdit(t.id)}
+                                  >
+                                    <span className="inline-flex items-center gap-2">
+                                      <Save className="h-4 w-4" />
+                                      Guardar
+                                    </span>
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="border-t border-zinc-100 px-5 py-4 text-sm text-zinc-500">
             Tip: mantené áreas cortas (Cocina / Barra / Depósito) para filtrar

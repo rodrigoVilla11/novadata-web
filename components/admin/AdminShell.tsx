@@ -24,6 +24,12 @@ import {
   ClipboardList,
   CalendarCheck2,
   Factory,
+  ShoppingCart,
+  Wallet,
+  BarChart3,
+  ArrowRightLeft,
+  FolderTree,
+  TrendingUp,
 } from "lucide-react";
 
 type NavLink = {
@@ -78,6 +84,78 @@ export default function AdminShell({
 
   // ---------------- NAV ----------------
   const nav: NavItem[] = [
+    // 0) FINANCE (núcleo financiero)
+    {
+      type: "group",
+      id: "finance",
+      label: "Finance",
+      roles: ["ADMIN", "MANAGER", "CASHIER"],
+      icon: <Wallet className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/finance",
+          label: "Overview",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <BarChart3 className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/finance/movements",
+          label: "Movimientos",
+          roles: ["ADMIN", "MANAGER", "CASHIER"],
+          icon: <ArrowRightLeft className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/finance/accounts",
+          label: "Cuentas",
+          roles: ["ADMIN"],
+          icon: <Wallet className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/finance/categories",
+          label: "Categorías",
+          roles: ["ADMIN"],
+          icon: <FolderTree className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/finance/stats",
+          label: "Estadísticas",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <TrendingUp className="h-4 w-4" />,
+        },
+      ],
+    },
+
+    // 1) POS (lo más usado)
+    {
+      type: "group",
+      id: "pos",
+      label: "POS",
+      roles: ["ADMIN", "MANAGER", "CASHIER"],
+      icon: <ShoppingCart className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/pos",
+          label: "Ventas (POS)",
+          roles: ["ADMIN", "MANAGER", "CASHIER"],
+          icon: <ShoppingCart className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/orders",
+          label: "Órdenes / Pedidos",
+          roles: ["ADMIN", "MANAGER", "CASHIER"],
+          icon: <ClipboardList className="h-4 w-4" />,
+        },
+      ],
+    },
+
+    // 2) Operación diaria
     {
       type: "link",
       href: "/admin",
@@ -85,45 +163,31 @@ export default function AdminShell({
       roles: ["ADMIN", "MANAGER"],
       icon: <LayoutDashboard className="h-4 w-4" />,
     },
-
     {
       type: "group",
-      id: "catalog",
-      label: "Catálogo",
+      id: "operation",
+      label: "Operación",
       roles: ["ADMIN", "MANAGER"],
-      icon: <Package className="h-4 w-4" />,
+      icon: <Layers className="h-4 w-4" />,
       children: [
         {
           type: "link",
-          href: "/admin/categories",
-          label: "Categorías",
+          href: "/admin/cash",
+          label: "Caja",
           roles: ["ADMIN", "MANAGER"],
-          icon: <Tags className="h-4 w-4" />,
+          icon: <ClipboardList className="h-4 w-4" />,
         },
         {
           type: "link",
-          href: "/admin/products",
-          label: "Productos",
+          href: "/admin/tasks",
+          label: "Tareas",
           roles: ["ADMIN", "MANAGER"],
-          icon: <Boxes className="h-4 w-4" />,
-        },
-        {
-          type: "link",
-          href: "/admin/ingredients",
-          label: "Ingredientes",
-          roles: ["ADMIN", "MANAGER"],
-          icon: <Package className="h-4 w-4" />,
-        },
-        {
-          type: "link",
-          href: "/admin/preparations",
-          label: "Preparaciones",
-          roles: ["ADMIN", "MANAGER"],
-          icon: <Layers className="h-4 w-4" />,
+          icon: <ClipboardList className="h-4 w-4" />,
         },
       ],
     },
 
+    // 3) Inventario
     {
       type: "group",
       id: "inventory",
@@ -148,23 +212,46 @@ export default function AdminShell({
       ],
     },
 
+    // 4) Catálogo
     {
       type: "group",
-      id: "operation",
-      label: "Operación",
+      id: "catalog",
+      label: "Catálogo",
       roles: ["ADMIN", "MANAGER"],
-      icon: <Boxes className="h-4 w-4" />,
+      icon: <Package className="h-4 w-4" />,
       children: [
         {
           type: "link",
-          href: "/admin/cash",
-          label: "Caja",
+          href: "/admin/products",
+          label: "Productos",
           roles: ["ADMIN", "MANAGER"],
-          icon: <ClipboardList className="h-4 w-4" />,
+          icon: <Boxes className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/ingredients",
+          label: "Ingredientes",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Package className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/preparations",
+          label: "Preparaciones",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Layers className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/categories",
+          label: "Categorías",
+          roles: ["ADMIN", "MANAGER"],
+          icon: <Tags className="h-4 w-4" />,
         },
       ],
     },
 
+    // 5) Personas
     {
       type: "group",
       id: "people",
@@ -194,14 +281,6 @@ export default function AdminShell({
           icon: <CalendarCheck2 className="h-4 w-4" />,
         },
       ],
-    },
-
-    {
-      type: "link",
-      href: "/admin/tasks",
-      label: "Tareas",
-      roles: ["ADMIN"],
-      icon: <ClipboardList className="h-4 w-4" />,
     },
   ];
 
