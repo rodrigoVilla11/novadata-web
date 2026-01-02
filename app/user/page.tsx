@@ -6,8 +6,6 @@ import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
-
-// (Opcional, pero si ya los usás en el proyecto, suma mucho a UX)
 import {
   RefreshCcw,
   CalendarDays,
@@ -36,14 +34,28 @@ function moneyARS(n: number) {
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS" });
 }
 
-function fmtTime(iso?: string | null) {
-  if (!iso) return "—";
-  const d = new Date(iso);
+function fmtTime(iso?: any) {
+  const v = toIsoLike(iso);
+  if (!v) return "—";
+  const d = new Date(v);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function fmtDateTime(iso?: string | null) {
+// tolerante para Date / ISO / EJSON {$date}
+function toIsoLike(v: any): string | null {
+  if (!v) return null;
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return new Date(v).toISOString();
+  if (typeof v === "object") {
+    if (typeof v.$date === "string") return v.$date;
+    if (typeof v.$date === "number") return new Date(v.$date).toISOString();
+  }
+  return null;
+}
+
+function fmtDateTime(v?: any) {
+  const iso = toIsoLike(v);
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
@@ -101,14 +113,24 @@ type SummaryResponse = {
 type ProductionRow = {
   id: string;
   dateKey: string;
-  at: string;
+  at?: any; // ✅ ahora tolerante
   taskName?: string | null;
   taskId?: string | null;
+  area?: string | null; // ✅ si backend lo manda
   notes?: string | null;
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function AreaPill({ area }: { area?: string | null }) {
+  if (!area) return null;
+  return (
+    <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+      {area}
+    </span>
+  );
 }
 
 export default function UserPanelPage() {
@@ -275,8 +297,6 @@ export default function UserPanelPage() {
       nextOpen[defaultKey] = true;
     }
     if (Object.keys(nextOpen).length) {
-      // no romper el render: setState dentro de memo es mala práctica.
-      // lo hacemos afuera con un microtask:
       queueMicrotask(() => setOpenDays((prev) => ({ ...nextOpen, ...prev })));
     }
 
@@ -290,8 +310,8 @@ export default function UserPanelPage() {
     return prodByDay
       .map(([dk, rows]) => {
         const filtered = rows.filter((r) => {
-          const hay = `${r.taskName ?? ""} ${r.taskId ?? ""} ${
-            r.notes ?? ""
+          const hay = `${r.taskName ?? ""} ${r.taskId ?? ""} ${r.notes ?? ""} ${
+            r.area ?? ""
           }`.toLowerCase();
           return hay.includes(q);
         });
@@ -305,6 +325,15 @@ export default function UserPanelPage() {
     const daysWithWork = new Set(prod.map((p) => p.dateKey)).size;
     return { totalTasks, daysWithWork };
   }, [prod]);
+
+  function taskLabel(r: ProductionRow) {
+    // ✅ backend ideal: taskName viene poblado
+    const name = (r.taskName ?? "").trim();
+    if (name) return name;
+    // fallback: mostrar un label humano si solo hay id
+    const id = (r.taskId ?? "").trim();
+    return id ? `Tarea (${id.slice(0, 6)}…${id.slice(-4)})` : "—";
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -440,7 +469,7 @@ export default function UserPanelPage() {
 
       {/* Content */}
       <div className="mx-auto max-w-5xl px-4 py-6 pb-28 space-y-6">
-        {/* Today — Gourmetify “action cards” */}
+        {/* Today — action cards */}
         <div className="grid gap-4 md:grid-cols-12">
           <div className="md:col-span-8">
             <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -513,7 +542,7 @@ export default function UserPanelPage() {
             </div>
           </div>
 
-          {/* Weekly summary “Gourmetify stats” */}
+          {/* Weekly summary */}
           <div className="md:col-span-4">
             <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="text-sm font-semibold text-zinc-900">
@@ -570,12 +599,9 @@ export default function UserPanelPage() {
           </div>
         </div>
 
-        {/* Week days: nicer list */}
+        {/* Week days: hours per day */}
         <Card>
-          <CardHeader
-            title="Detalle de días"
-            subtitle="Horas por día (semana)"
-          />
+          <CardHeader title="Detalle de días" subtitle="Horas por día (semana)" />
           <CardBody>
             {!summary ? (
               <div className="text-sm text-zinc-500">Cargando…</div>
@@ -621,7 +647,6 @@ export default function UserPanelPage() {
                             {it.hours} h
                           </div>
                           <div className="mt-1 h-2 w-28 overflow-hidden rounded-full bg-zinc-100">
-                            {/* bar simple (0..12h) */}
                             <div
                               className="h-full bg-zinc-900"
                               style={{
@@ -745,15 +770,35 @@ export default function UserPanelPage() {
                           <tbody className="divide-y divide-zinc-100">
                             {rows
                               .slice()
-                              .sort((a, b) => (a.at < b.at ? 1 : -1))
+                              // ✅ ordenar por fecha real si existe, si no por string
+                              .sort((a, b) => {
+                                const ta = new Date(toIsoLike(a.at) ?? 0).getTime();
+                                const tb = new Date(toIsoLike(b.at) ?? 0).getTime();
+                                if (Number.isFinite(tb - ta) && (tb - ta) !== 0) return tb - ta;
+                                return String(b.at ?? "").localeCompare(String(a.at ?? ""));
+                              })
                               .map((r) => (
                                 <tr key={r.id} className="hover:bg-zinc-50/60">
-                                  <td className="px-4 py-3 text-sm text-zinc-700">
+                                  <td className="px-4 py-3 text-sm text-zinc-700 whitespace-nowrap">
                                     {fmtDateTime(r.at)}
                                   </td>
-                                  <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
-                                    {r.taskName || r.taskId || "—"}
+
+                                  <td className="px-4 py-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="text-sm font-semibold text-zinc-900">
+                                        {taskLabel(r)}
+                                      </div>
+                                      <AreaPill area={r.area ?? null} />
+                                    </div>
+
+                                    {/* ✅ si no hay taskName y sólo hay id, mostrás el id completo en chiquito */}
+                                    {!((r.taskName ?? "").trim()) && (r.taskId ?? "").trim() && (
+                                      <div className="mt-0.5 text-xs text-zinc-500">
+                                        ID: {r.taskId}
+                                      </div>
+                                    )}
                                   </td>
+
                                   <td className="px-4 py-3 text-sm text-zinc-700">
                                     {r.notes?.trim() ? r.notes : "—"}
                                   </td>
@@ -771,7 +816,7 @@ export default function UserPanelPage() {
         </div>
       </div>
 
-      {/* Sticky Bottom Bar (Gourmetify mobile-first) */}
+      {/* Sticky Bottom Bar */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/90 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -798,9 +843,7 @@ export default function UserPanelPage() {
               <Button
                 variant="secondary"
                 onClick={checkOut}
-                disabled={
-                  busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt
-                }
+                disabled={busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt}
                 loading={busy}
               >
                 Salida
