@@ -455,7 +455,7 @@ export default function AdminIngredientsPage() {
 
   return (
     <AdminProtected>
-      <div className="space-y-6">
+      <div className="space-y-6 text-zinc-500">
         {/* Header */}
         <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">

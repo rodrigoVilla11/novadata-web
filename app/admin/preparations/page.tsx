@@ -592,7 +592,7 @@ export default function AdminPreparationsPage() {
 
   return (
     <AdminProtected allow={["ADMIN", "MANAGER"] as any}>
-      <div className="space-y-6">
+      <div className="space-y-6 text-zinc-500">
         {/* Header */}
         <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
