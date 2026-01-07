@@ -33,14 +33,14 @@ type Ingredient = {
   stock: { minQty: number };
 };
 
-// ✅ Asumimos que snapshots ya usan ingredientId.
-// Si tu backend todavía usa productId, avisame y te lo ajusto en 2 líneas.
 type Snapshot = {
   id: string;
   dateKey: string;
   supplierId: string;
   items: { ingredientId: string; qty: number }[];
 };
+
+const ALL = "__ALL__";
 
 function unitLabel(u: Ingredient["baseUnit"]) {
   if (u === "UNIT") return "Unidad";
@@ -72,6 +72,12 @@ function looksForbidden(msg: string) {
   );
 }
 
+type CacheEntry = {
+  ingredients: Ingredient[];
+  qtyMap: Record<string, string>;
+  initialHash: string;
+};
+
 export default function StockPage() {
   const router = useRouter();
   const { getAccessToken } = useAuth();
@@ -79,8 +85,9 @@ export default function StockPage() {
   // Form
   const [dateKey, setDateKey] = useState(todayKey());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierId, setSupplierId] = useState("");
+  const [supplierId, setSupplierId] = useState<string>(ALL);
 
+  // Visible data
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [qtyByIngredientId, setQtyByIngredientId] = useState<
     Record<string, string>
@@ -101,9 +108,13 @@ export default function StockPage() {
   const [showOnlyMissing, setShowOnlyMissing] = useState(false);
   const [compact, setCompact] = useState(false);
 
-  // Dirty tracking
+  // Dirty tracking (vista actual)
   const initialHashRef = useRef("");
   const hasLoadedOnceRef = useRef(false);
+
+  // Cache por fecha+proveedor (para no perder datos al cambiar)
+  const cacheRef = useRef<Record<string, CacheEntry>>({});
+  const cacheKey = (sid: string) => `${dateKey}|${sid}`;
 
   // Prevent setState after unmount
   const aliveRef = useRef(true);
@@ -124,6 +135,88 @@ export default function StockPage() {
     [ingredients]
   );
 
+  // =======================
+  // Cache helpers (CRÍTICO)
+  // =======================
+
+  function upsertCacheForSupplier(
+    sid: string,
+    update: (prev: CacheEntry) => CacheEntry
+  ) {
+    const key = cacheKey(sid);
+    const prev = cacheRef.current[key];
+
+    if (prev) {
+      cacheRef.current[key] = update(prev);
+      return;
+    }
+
+    // inicializa cache si todavía no existe (fallback)
+    const ings = ingredients.filter((i) => i.supplierId === sid);
+    const map: Record<string, string> = {};
+    for (const ing of ings) map[ing.id] = qtyByIngredientId[ing.id] ?? "";
+
+    cacheRef.current[key] = update({
+      ingredients: ings,
+      qtyMap: map,
+      initialHash: JSON.stringify(map),
+    });
+  }
+
+  function setCachedQty(ingredientId: string, value: string) {
+    const ing = ingredients.find((x) => x.id === ingredientId);
+    if (!ing) return;
+
+    const sid = ing.supplierId;
+
+    upsertCacheForSupplier(sid, (prev) => ({
+      ...prev,
+      ingredients:
+        prev.ingredients?.length > 0
+          ? prev.ingredients
+          : ingredients.filter((i) => i.supplierId === sid),
+      qtyMap: { ...prev.qtyMap, [ingredientId]: value },
+    }));
+  }
+
+  function setCachedQtyMany(
+    pairs: Array<{ ingredientId: string; value: string }>
+  ) {
+    // agrupa por proveedor (evita N updates separados)
+    const bySupplier: Record<
+      string,
+      Array<{ ingredientId: string; value: string }>
+    > = {};
+
+    for (const it of pairs) {
+      const ing = ingredients.find((x) => x.id === it.ingredientId);
+      if (!ing) continue;
+      const sid = ing.supplierId;
+      (bySupplier[sid] ||= []).push(it);
+    }
+
+    for (const sid of Object.keys(bySupplier)) {
+      const list = bySupplier[sid];
+      upsertCacheForSupplier(sid, (prev) => {
+        const nextMap = { ...prev.qtyMap };
+        for (const it of list) nextMap[it.ingredientId] = it.value;
+
+        return {
+          ...prev,
+          ingredients:
+            prev.ingredients?.length > 0
+              ? prev.ingredients
+              : ingredients.filter((i) => i.supplierId === sid),
+          qtyMap: nextMap,
+        };
+      });
+    }
+  }
+
+  // ================
+  // Stats + Filtros
+  // ================
+
   const stats = useMemo(() => {
     const belowMin = activeIngredients.filter((p) => {
       const n = toNum(qtyByIngredientId[p.id]);
@@ -139,48 +232,36 @@ export default function StockPage() {
       total: activeIngredients.length,
       belowMin,
       missing,
-      ok:
-        activeIngredients.length > 0 && belowMin === 0 && missing === 0,
+      ok: activeIngredients.length > 0 && belowMin === 0 && missing === 0,
     };
   }, [activeIngredients, qtyByIngredientId]);
 
   const filteredIngredients = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return activeIngredients
-      .filter((p) => {
-        const raw = qtyByIngredientId[p.id] ?? "";
-        const n = raw === "" ? 0 : Number(raw);
-        const min = p.stock?.minQty ?? 0;
+    return (
+      activeIngredients
+        .filter((p) => {
+          const raw = qtyByIngredientId[p.id] ?? "";
+          const n = raw === "" ? 0 : Number(raw);
+          const min = p.stock?.minQty ?? 0;
 
-        const isBelowMin = min > 0 && Number.isFinite(n) && n < min;
-        const isMissing = raw === "";
+          const isBelowMin = min > 0 && Number.isFinite(n) && n < min;
+          const isMissing = raw === "";
 
-        if (showOnlyBelowMin && !isBelowMin) return false;
-        if (showOnlyMissing && !isMissing) return false;
+          if (showOnlyBelowMin && !isBelowMin) return false;
+          if (showOnlyMissing && !isMissing) return false;
 
-        if (!q) return true;
+          if (!q) return true;
 
-        return (
-          p.name.toLowerCase().includes(q) ||
-          unitLabel(p.baseUnit).toLowerCase().includes(q)
-        );
-      })
-      // UX: primero faltantes, luego bajo mínimo, luego alfabético
-      .sort((a, b) => {
-        const aMissing = (qtyByIngredientId[a.id] ?? "") === "" ? 1 : 0;
-        const bMissing = (qtyByIngredientId[b.id] ?? "") === "" ? 1 : 0;
-        if (bMissing !== aMissing) return bMissing - aMissing;
-
-        const aMin = a.stock?.minQty ?? 0;
-        const bMin = b.stock?.minQty ?? 0;
-
-        const aBelow = aMin > 0 && toNum(qtyByIngredientId[a.id]) < aMin ? 1 : 0;
-        const bBelow = bMin > 0 && toNum(qtyByIngredientId[b.id]) < bMin ? 1 : 0;
-        if (bBelow !== aBelow) return bBelow - aBelow;
-
-        return a.name.localeCompare(b.name);
-      });
+          return (
+            p.name.toLowerCase().includes(q) ||
+            unitLabel(p.baseUnit).toLowerCase().includes(q)
+          );
+        })
+        // UX: primero faltantes, luego bajo mínimo, luego alfabético
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
   }, [
     activeIngredients,
     qtyByIngredientId,
@@ -205,20 +286,19 @@ export default function StockPage() {
       }
       if (!token) throw new Error("No autenticado (token no disponible).");
 
-      const s = await apiFetchAuthed<Supplier[]>(async () => token!, "/suppliers");
+      const s = await apiFetchAuthed<Supplier[]>(
+        async () => token!,
+        "/suppliers"
+      );
 
       if (!aliveRef.current) return;
       setSuppliers(s);
-
-      const first =
-        s.find((x) => x.isActive !== false && x.id === supplierId) ||
-        s.find((x) => x.isActive !== false);
-
-      if (first && aliveRef.current) setSupplierId(first.id);
     } catch (e: any) {
       const msg = String(e?.message || "Error cargando proveedores");
       if (looksForbidden(msg)) {
-        setErr("Sin permisos para ver proveedores (tu rol no está habilitado para Stock).");
+        setErr(
+          "Sin permisos para ver proveedores (tu rol no está habilitado para Stock)."
+        );
       } else {
         setErr(msg);
       }
@@ -227,40 +307,110 @@ export default function StockPage() {
     }
   }
 
+  async function fetchAndCacheSupplier(sid: string): Promise<CacheEntry> {
+    const key = cacheKey(sid);
+    const cached = cacheRef.current[key];
+    if (cached) return cached;
+
+    const ings = await apiFetchAuthed<Ingredient[]>(
+      getAccessToken,
+      `/ingredients?supplierId=${encodeURIComponent(sid)}`
+    );
+
+    const snap = await apiFetchAuthed<Snapshot | null>(
+      getAccessToken,
+      `/stock-snapshots?dateKey=${encodeURIComponent(
+        dateKey
+      )}&supplierId=${encodeURIComponent(sid)}`
+    );
+
+    const map: Record<string, string> = {};
+    for (const p of ings) map[p.id] = "";
+
+    if (snap?.items?.length) {
+      for (const it of snap.items) {
+        map[it.ingredientId] = String(it.qty ?? "");
+      }
+    }
+
+    const entry: CacheEntry = {
+      ingredients: ings,
+      qtyMap: map,
+      initialHash: JSON.stringify(map),
+    };
+
+    cacheRef.current[key] = entry;
+    return entry;
+  }
+
   async function loadSupplierData(nextSupplierId?: string) {
     const sid = nextSupplierId ?? supplierId;
-    if (!sid) return;
+    if (!sid || sid === ALL) return;
 
     setErr(null);
     setOkMsg(null);
     setLoadingData(true);
 
     try {
-      const ings = await apiFetchAuthed<Ingredient[]>(
-        getAccessToken,
-        `/ingredients?supplierId=${encodeURIComponent(sid)}`
-      );
-      if (!aliveRef.current) return;
-      setIngredients(ings);
-
-      const snap = await apiFetchAuthed<Snapshot | null>(
-        getAccessToken,
-        `/stock-snapshots?dateKey=${encodeURIComponent(dateKey)}&supplierId=${encodeURIComponent(sid)}`
-      );
-
-      if (!aliveRef.current) return;
-
-      const map: Record<string, string> = {};
-      for (const p of ings) map[p.id] = "";
-
-      if (snap?.items?.length) {
-        for (const it of snap.items) {
-          map[it.ingredientId] = String(it.qty ?? "");
-        }
+      // ✅ usar cache si ya existe (no pisar)
+      const key = cacheKey(sid);
+      const cached = cacheRef.current[key];
+      if (cached) {
+        if (!aliveRef.current) return;
+        setIngredients(cached.ingredients);
+        setQtyByIngredientId(cached.qtyMap);
+        initialHashRef.current = cached.initialHash;
+        hasLoadedOnceRef.current = true;
+        return;
       }
 
-      setQtyByIngredientId(map);
-      initialHashRef.current = JSON.stringify(map);
+      const entry = await fetchAndCacheSupplier(sid);
+      if (!aliveRef.current) return;
+
+      setIngredients(entry.ingredients);
+      setQtyByIngredientId(entry.qtyMap);
+
+      initialHashRef.current = entry.initialHash;
+      hasLoadedOnceRef.current = true;
+    } catch (e: any) {
+      const msg = String(e?.message || "Error cargando stock");
+      if (looksForbidden(msg)) {
+        setErr("Sin permisos para ver stock / snapshots.");
+      } else {
+        setErr(msg);
+      }
+    } finally {
+      if (aliveRef.current) setLoadingData(false);
+    }
+  }
+
+  async function loadAllData() {
+    setErr(null);
+    setOkMsg(null);
+    setLoadingData(true);
+
+    try {
+      const actives = activeSuppliers;
+      if (!actives.length) {
+        setIngredients([]);
+        setQtyByIngredientId({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        actives.map((s) => fetchAndCacheSupplier(s.id))
+      );
+      if (!aliveRef.current) return;
+
+      const allIngredients = entries.flatMap((e) => e.ingredients);
+
+      const allQtyMap: Record<string, string> = {};
+      for (const e of entries) Object.assign(allQtyMap, e.qtyMap);
+
+      setIngredients(allIngredients);
+      setQtyByIngredientId(allQtyMap);
+
+      initialHashRef.current = JSON.stringify(allQtyMap);
       hasLoadedOnceRef.current = true;
     } catch (e: any) {
       const msg = String(e?.message || "Error cargando stock");
@@ -279,11 +429,20 @@ export default function StockPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ Si cambia el día, limpiamos cache (son otros snapshots)
   useEffect(() => {
-    if (!supplierId) return;
-    loadSupplierData();
+    cacheRef.current = {};
+    hasLoadedOnceRef.current = false;
+    initialHashRef.current = "";
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId, dateKey]);
+  }, [dateKey]);
+
+  useEffect(() => {
+    if (loadingSuppliers) return;
+    if (supplierId === ALL) loadAllData();
+    else loadSupplierData(supplierId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId, dateKey, loadingSuppliers]);
 
   const isDirty = useMemo(() => {
     if (!hasLoadedOnceRef.current) return false;
@@ -298,6 +457,7 @@ export default function StockPage() {
     // acepta "" o números con punto
     if (v === "" || /^[0-9]*([.][0-9]*)?$/.test(v)) {
       setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: v }));
+      setCachedQty(ingredientId, v); // ✅ no perder al filtrar/cambiar
     }
   }
 
@@ -309,38 +469,111 @@ export default function StockPage() {
       0,
       999999
     );
-    setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: String(next) }));
+    const nextStr = String(next);
+
+    setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: nextStr }));
+    setCachedQty(ingredientId, nextStr); // ✅
   }
 
   function clearAll() {
-    if (!window.confirm("¿Vaciar todos los valores cargados?")) return;
-    const next: Record<string, string> = {};
-    for (const p of ingredients) next[p.id] = "";
-    setQtyByIngredientId(next);
+    if (!window.confirm("¿Vaciar todos los valores cargados (vista actual)?"))
+      return;
+
+    const pairs: Array<{ ingredientId: string; value: string }> = [];
+    for (const p of ingredients) pairs.push({ ingredientId: p.id, value: "" });
+
+    setQtyByIngredientId((prev) => {
+      const next = { ...prev };
+      for (const it of pairs) next[it.ingredientId] = "";
+      return next;
+    });
+
+    setCachedQtyMany(pairs); // ✅ actualiza cache por proveedor
   }
 
   async function save() {
-    if (!supplierId) return;
-
     setErr(null);
     setOkMsg(null);
     setSaving(true);
 
     try {
-      const items = activeIngredients.map((p) => ({
-        ingredientId: p.id,
-        qty: toNum(qtyByIngredientId[p.id]),
-      }));
+      const putSnapshot = async (
+        sid: string,
+        ings: Ingredient[],
+        qtyMap: Record<string, string>
+      ) => {
+        const items = ings
+          .filter((p) => p.isActive !== false)
+          .map((p) => ({
+            ingredientId: p.id,
+            qty: toNum(qtyMap[p.id]),
+          }));
 
-      await apiFetchAuthed(getAccessToken, "/stock-snapshots", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dateKey, supplierId, items }),
-      });
+        await apiFetchAuthed(getAccessToken, "/stock-snapshots", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dateKey, supplierId: sid, items }),
+        });
 
-      if (!aliveRef.current) return;
-      setOkMsg("Guardado ✔");
-      initialHashRef.current = JSON.stringify(qtyByIngredientId);
+        // update initialHash del proveedor (guardado)
+        const key = cacheKey(sid);
+        const current = cacheRef.current[key];
+        if (current) {
+          cacheRef.current[key] = {
+            ...current,
+            initialHash: JSON.stringify(current.qtyMap),
+          };
+        }
+      };
+
+      if (supplierId === ALL) {
+        const actives = activeSuppliers;
+
+        await Promise.all(
+          actives.map(async (s) => {
+            const entry = await fetchAndCacheSupplier(s.id);
+
+            // sincroniza mapa del proveedor con lo que está en pantalla
+            const mergedMap = { ...entry.qtyMap };
+            for (const ing of entry.ingredients) {
+              mergedMap[ing.id] = qtyByIngredientId[ing.id] ?? "";
+            }
+
+            await putSnapshot(s.id, entry.ingredients, mergedMap);
+
+            // persistimos mergedMap en cache
+            cacheRef.current[cacheKey(s.id)] = {
+              ingredients: entry.ingredients,
+              qtyMap: mergedMap,
+              initialHash: JSON.stringify(mergedMap),
+            };
+          })
+        );
+
+        if (!aliveRef.current) return;
+        setOkMsg("Guardado de TODOS los proveedores ✔");
+        initialHashRef.current = JSON.stringify(qtyByIngredientId);
+      } else {
+        const sid = supplierId;
+
+        const entry = await fetchAndCacheSupplier(sid);
+        const mergedMap = { ...entry.qtyMap };
+        for (const ing of entry.ingredients) {
+          mergedMap[ing.id] = qtyByIngredientId[ing.id] ?? "";
+        }
+
+        await putSnapshot(sid, entry.ingredients, mergedMap);
+
+        cacheRef.current[cacheKey(sid)] = {
+          ingredients: entry.ingredients,
+          qtyMap: mergedMap,
+          initialHash: JSON.stringify(mergedMap),
+        };
+
+        if (!aliveRef.current) return;
+        setOkMsg("Guardado ✔");
+        initialHashRef.current = JSON.stringify(qtyByIngredientId);
+      }
     } catch (e: any) {
       const msg = String(e?.message || "Error guardando");
       if (looksForbidden(msg)) {
@@ -356,7 +589,14 @@ export default function StockPage() {
   async function refresh() {
     setBusyRefresh(true);
     try {
-      await loadSupplierData();
+      // Forzar re-fetch (limpia cache de la vista actual)
+      if (supplierId === ALL) {
+        cacheRef.current = {};
+        await loadAllData();
+      } else {
+        delete cacheRef.current[cacheKey(supplierId)];
+        await loadSupplierData(supplierId);
+      }
     } finally {
       if (aliveRef.current) setBusyRefresh(false);
     }
@@ -427,7 +667,7 @@ export default function StockPage() {
                   variant="secondary"
                   onClick={refresh}
                   loading={busyRefresh}
-                  disabled={busyRefresh || saving || !supplierId}
+                  disabled={busyRefresh || saving}
                 >
                   <RefreshCcw className="h-4 w-4" />
                   Actualizar
@@ -445,7 +685,7 @@ export default function StockPage() {
                 <Button
                   onClick={save}
                   loading={saving}
-                  disabled={saving || isLoading || !supplierId}
+                  disabled={saving || isLoading}
                 >
                   Guardar
                 </Button>
@@ -487,6 +727,7 @@ export default function StockPage() {
                     onChange={(e) => setSupplierId(e.target.value)}
                     disabled={loadingSuppliers || saving}
                   >
+                    <option value={ALL}>Todos</option>
                     {activeSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
@@ -545,9 +786,12 @@ export default function StockPage() {
           {/* Tabla */}
           <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <div className="border-b border-zinc-100 px-5 py-4">
-              <h2 className="text-lg font-semibold text-zinc-900">Ingredientes</h2>
+              <h2 className="text-lg font-semibold text-zinc-900">
+                Ingredientes
+              </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Tip: podés usar <b>+</b>/<b>-</b> para ajustar rápido. Si el stock está bajo mínimo se marca en ámbar.
+                Tip: podés usar <b>+</b>/<b>-</b> para ajustar rápido. Si el
+                stock está bajo mínimo se marca en ámbar.
               </p>
             </div>
 
@@ -576,7 +820,10 @@ export default function StockPage() {
                 <tbody className="divide-y divide-zinc-100">
                   {isLoading && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-sm text-zinc-500">
+                      <td
+                        colSpan={5}
+                        className="px-4 py-8 text-sm text-zinc-500"
+                      >
                         Cargando ingredientes…
                       </td>
                     </tr>
@@ -584,7 +831,10 @@ export default function StockPage() {
 
                   {!isLoading && filteredIngredients.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-10 text-sm text-zinc-500">
+                      <td
+                        colSpan={5}
+                        className="px-4 py-10 text-sm text-zinc-500"
+                      >
                         No hay ingredientes para mostrar.
                       </td>
                     </tr>
@@ -608,9 +858,13 @@ export default function StockPage() {
                           )}
                         >
                           <td className={cn("px-4", compact ? "py-2" : "py-3")}>
-                            <div className="font-semibold text-zinc-900">{p.name}</div>
+                            <div className="font-semibold text-zinc-900">
+                              {p.name}
+                            </div>
                             {isMissing && (
-                              <div className="mt-0.5 text-xs text-amber-700">Sin cargar</div>
+                              <div className="mt-0.5 text-xs text-amber-700">
+                                Sin cargar
+                              </div>
                             )}
                             {isBelowMin && !isMissing && (
                               <div className="mt-0.5 text-xs text-amber-700">
@@ -619,11 +873,21 @@ export default function StockPage() {
                             )}
                           </td>
 
-                          <td className={cn("px-4 text-zinc-700", compact ? "py-2" : "py-3")}>
+                          <td
+                            className={cn(
+                              "px-4 text-zinc-700",
+                              compact ? "py-2" : "py-3"
+                            )}
+                          >
                             {unitLabel(p.baseUnit)}
                           </td>
 
-                          <td className={cn("px-4 text-zinc-700", compact ? "py-2" : "py-3")}>
+                          <td
+                            className={cn(
+                              "px-4 text-zinc-700",
+                              compact ? "py-2" : "py-3"
+                            )}
+                          >
                             {min}
                           </td>
 
@@ -635,7 +899,9 @@ export default function StockPage() {
                               inputMode="decimal"
                               className={cn(
                                 "w-32",
-                                isBelowMin ? "border-amber-300 focus:ring-amber-200" : ""
+                                isBelowMin
+                                  ? "border-amber-300 focus:ring-amber-200"
+                                  : ""
                               )}
                               disabled={saving}
                               onKeyDown={(e) => {
@@ -648,11 +914,13 @@ export default function StockPage() {
                                   stepQty(p.id, -1);
                                 }
                                 if (e.key === "Enter") {
-                                  const nextId = filteredIngredients[idx + 1]?.id;
+                                  const nextId =
+                                    filteredIngredients[idx + 1]?.id;
                                   if (nextId) {
-                                    const el = document.querySelector<HTMLInputElement>(
-                                      `input[data-stock="${nextId}"]`
-                                    );
+                                    const el =
+                                      document.querySelector<HTMLInputElement>(
+                                        `input[data-stock="${nextId}"]`
+                                      );
                                     el?.focus();
                                   }
                                 }

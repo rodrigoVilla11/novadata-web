@@ -18,6 +18,8 @@ import {
   ShoppingCart,
   Truck,
   X,
+  ClipboardList,
+  Eye,
 } from "lucide-react";
 
 /* =============================================================================
@@ -190,13 +192,14 @@ type IngredientLite = {
   currency?: "ARS" | "USD";
 };
 
-type PurchaseOrderStatus =
-  | "DRAFT"
-  | "SENT"
-  | "CONFIRMED"
-  | "RECEIVED_PARTIAL"
-  | "RECEIVED"
-  | "CANCELLED";
+type StockSnapshot = {
+  id: string;
+  dateKey: string;
+  supplierId: string;
+  items: { productId: string; qty: number }[];
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 /* =============================================================================
  * Page
@@ -210,13 +213,21 @@ export default function AdminStockPage() {
   const isManager = roles.includes("MANAGER");
   const canWrite = isAdmin || isManager;
 
-  const [tab, setTab] = useState<"balance" | "movements">("balance");
+  const [tab, setTab] = useState<"balance" | "movements" | "snapshots">(
+    "balance"
+  );
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
 
   const [ingredients, setIngredients] = useState<IngredientLite[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierLite[]>([]);
   const [balances, setBalances] = useState<StockBalanceRow[]>([]);
   const [movements, setMovements] = useState<StockMovementRow[]>([]);
+
+  // snapshots
+  const [snapshots, setSnapshots] = useState<StockSnapshot[]>([]);
+  const [snapSupplierId, setSnapSupplierId] = useState<string>(""); // filtro opcional
+  const [snapQ, setSnapQ] = useState<string>(""); // busca ingrediente dentro de snapshot (por nombre)
+  const [snapOpenId, setSnapOpenId] = useState<string>(""); // row expand
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -266,14 +277,25 @@ export default function AdminStockPage() {
   const cartList = useMemo(() => Object.values(cart), [cart]);
 
   const cartBySupplier = useMemo(() => {
-    const m = new Map<string, { supplierId: string; supplierName: string; items: CartItem[] }>();
+    const m = new Map<
+      string,
+      { supplierId: string; supplierName: string; items: CartItem[] }
+    >();
     for (const it of cartList) {
       const key = it.supplierId;
       const prev = m.get(key);
-      if (!prev) m.set(key, { supplierId: it.supplierId, supplierName: it.supplierName, items: [it] });
+      if (!prev)
+        m.set(key, {
+          supplierId: it.supplierId,
+          supplierName: it.supplierName,
+          items: [it],
+        });
       else prev.items.push(it);
     }
-    return Array.from(m.values()).sort((a, b) => a.supplierName.localeCompare(b.supplierName));
+    // proveedor alfabetico
+    return Array.from(m.values()).sort((a, b) =>
+      a.supplierName.localeCompare(b.supplierName)
+    );
   }, [cartList]);
 
   const cartTotals = useMemo(() => {
@@ -300,7 +322,10 @@ export default function AdminStockPage() {
   }
 
   function upsertCartItem(it: CartItem) {
-    setCart((prev) => ({ ...prev, [cartKey(it.ingredientId, it.supplierId)]: it }));
+    setCart((prev) => ({
+      ...prev,
+      [cartKey(it.ingredientId, it.supplierId)]: it,
+    }));
   }
 
   function removeCartItem(ingredientId: string, supplierId: string) {
@@ -329,12 +354,6 @@ export default function AdminStockPage() {
     for (const it of ingredients) m.set(it.id, it);
     return m;
   }, [ingredients]);
-
-  const balanceByIngredientId = useMemo(() => {
-    const m = new Map<string, StockBalanceRow>();
-    for (const b of balances) m.set(b.ingredientId, b);
-    return m;
-  }, [balances]);
 
   const activeIngredients = useMemo(
     () =>
@@ -368,28 +387,109 @@ export default function AdminStockPage() {
       });
     }
 
+    // ✅ pedido: SIEMPRE orden alfabético por ingrediente (sin “bajos primero”)
     rows.sort((a, b) => {
       const ia = ingById.get(a.ingredientId);
       const ib = ingById.get(b.ingredientId);
-      const ma = Number(ia?.minQty ?? 0) || 0;
-      const mb = Number(ib?.minQty ?? 0) || 0;
-      const lowA = ma > 0 && num(a.qty) < ma ? 1 : 0;
-      const lowB = mb > 0 && num(b.qty) < mb ? 1 : 0;
-      if (lowA !== lowB) return lowB - lowA;
-
-      const sa = (ia?.supplierName || "").localeCompare(ib?.supplierName || "");
-      if (sa !== 0) return sa;
-
-      const na = (ia?.displayName || ia?.name || "").localeCompare(
-        ib?.displayName || ib?.name || ""
-      );
-      if (na !== 0) return na;
-
-      return String(a.unit).localeCompare(String(b.unit));
+      const na = (ia?.displayName || ia?.name || a.ingredientId).toLowerCase();
+      const nb = (ib?.displayName || ib?.name || b.ingredientId).toLowerCase();
+      if (na !== nb) return na.localeCompare(nb);
+      return String(a.unit || "").localeCompare(String(b.unit || ""));
     });
 
     return rows;
   }, [balances, balanceQ, onlyLow, ingById]);
+
+  const activeSuppliers = useMemo(
+    () => suppliers.filter((s) => s.isActive !== false),
+    [suppliers]
+  );
+
+  const filteredSnapshots = useMemo(() => {
+    let rows = snapshots.slice();
+
+    if (snapSupplierId.trim()) {
+      rows = rows.filter((s) => String(s.supplierId) === snapSupplierId.trim());
+    }
+
+    // ordenar por proveedor y luego por updatedAt desc
+    rows.sort((a, b) => {
+      const sa =
+        (supplierById.get(a.supplierId)?.name || a.supplierId || "").toLowerCase();
+      const sb =
+        (supplierById.get(b.supplierId)?.name || b.supplierId || "").toLowerCase();
+      if (sa !== sb) return sa.localeCompare(sb);
+
+      const ua = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const ub = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return ub - ua;
+    });
+
+    return rows;
+  }, [snapshots, snapSupplierId, supplierById]);
+
+  function getSupplierLabelById(supplierId?: string | null) {
+    if (!supplierId) return "—";
+    return supplierById.get(String(supplierId))?.name || String(supplierId);
+  }
+
+  function getSupplierLabel(ing: IngredientLite) {
+    const sid = ing.supplierId;
+    if (!sid) return "— Sin proveedor —";
+    const fromIng = (ing.supplierName || "").trim();
+    if (fromIng) return fromIng;
+    const s = supplierById.get(sid);
+    return s?.name || sid;
+  }
+
+  function computeSuggestedQty(balanceRow: StockBalanceRow) {
+    const ing = ingById.get(balanceRow.ingredientId);
+    const onHand = num(balanceRow.qty);
+    const minQty = Number(ing?.minQty ?? 0) || 0;
+    const idealQty = Number(ing?.idealQty ?? 0) || 0;
+
+    const target = minQty > 0 ? minQty : idealQty > 0 ? idealQty : 0;
+    if (target <= 0) return 0;
+
+    const need = Math.max(0, target - onHand);
+    return Number.isFinite(need) ? need : 0;
+  }
+
+  function addToCartFromRow(r: StockBalanceRow) {
+    const ing = ingById.get(r.ingredientId);
+    if (!ing) return;
+
+    const supplierId = String(ing.supplierId ?? "").trim();
+    if (!supplierId) {
+      setErr(
+        "Este ingrediente no tiene supplierId asignado. Asignalo para poder pedir."
+      );
+      return;
+    }
+
+    const supplierName = getSupplierLabel(ing);
+    const suggested = computeSuggestedQty(r);
+    const unit = (ing.baseUnit ?? r.unit ?? "UNIT") as Unit;
+
+    const item: CartItem = {
+      ingredientId: ing.id,
+      ingredientName: ing.displayName || ing.name || ing.id,
+      supplierId,
+      supplierName,
+      unit,
+      qty: suggested > 0 ? String(suggested) : "1",
+      suggested,
+      note: null,
+      name_for_supplier: ing.name_for_supplier ?? null,
+      approxUnitCost: num(ing.lastCost),
+      currency: ing.currency ?? "ARS",
+    };
+
+    upsertCartItem(item);
+    setCartOpen(true);
+    setOk("Agregado al pedido ✔");
+    setTimeout(() => setOk(null), 900);
+  }
 
   /* ---------------- loaders ---------------- */
 
@@ -408,7 +508,6 @@ export default function AdminStockPage() {
   }
 
   async function loadIngredientsMaybe() {
-    // Ajustá si tu endpoint es otro: /ingredients, /ingredients/all, etc.
     try {
       const rows = await apiFetchAuthed<any[]>(getAccessToken, "/ingredients");
 
@@ -418,11 +517,12 @@ export default function AdminStockPage() {
         const baseUnit = (r.baseUnit ?? r.unit ?? "UNIT") as Unit;
 
         const stock = r.stock ?? {};
-        const minQty = Number(stock.minQty ?? 0) || 0;
+        const minQty = Number(stock.minQty ?? r.minQty ?? 0) || 0;
 
-        const supplierId = String(r.supplierId ?? r.supplier?.id ?? r.supplier?._id ?? "").trim() || null;
+        const supplierId =
+          String(r.supplierId ?? r.supplier?.id ?? r.supplier?._id ?? "").trim() ||
+          null;
 
-        // prefer supplierName from ingredient response; fallback to suppliers map later
         const supplierName =
           String(r.supplierName ?? r.supplier?.name ?? "").trim() || null;
 
@@ -437,10 +537,10 @@ export default function AdminStockPage() {
           baseUnit,
           isActive: r.isActive ?? true,
 
-          trackStock: stock.trackStock ?? true,
+          trackStock: stock.trackStock ?? r.trackStock ?? true,
           minQty,
-          idealQty: stock.idealQty ?? null,
-          storageLocation: stock.storageLocation ?? null,
+          idealQty: stock.idealQty ?? r.idealQty ?? null,
+          storageLocation: stock.storageLocation ?? r.storageLocation ?? null,
 
           supplierId,
           supplierName,
@@ -480,6 +580,38 @@ export default function AdminStockPage() {
     setMovements(rows ?? []);
   }
 
+  // ✅ snapshots: acepta array (getMany) o single (getOne) según tu controller
+  async function loadSnapshots() {
+    const qs = new URLSearchParams();
+    qs.set("dateKey", dateKey);
+    if (snapSupplierId.trim()) qs.set("supplierId", snapSupplierId.trim());
+
+    const res = await apiFetchAuthed<any>(
+      getAccessToken,
+      `/stock-snapshots?${qs.toString()}`
+    );
+
+    const list: StockSnapshot[] = Array.isArray(res)
+      ? res
+      : res
+      ? [res]
+      : [];
+
+    setSnapshots(
+      list.map((s: any) => ({
+        id: String(s.id ?? s._id ?? ""),
+        dateKey: String(s.dateKey ?? ""),
+        supplierId: String(s.supplierId ?? ""),
+        items: (s.items ?? []).map((it: any) => ({
+          productId: String(it.productId ?? it.ingredientId ?? ""),
+          qty: num(it.qty),
+        })),
+        createdAt: s.createdAt ?? null,
+        updatedAt: s.updatedAt ?? null,
+      }))
+    );
+  }
+
   async function loadAll() {
     setErr(null);
     setOk(null);
@@ -487,7 +619,7 @@ export default function AdminStockPage() {
 
     try {
       await Promise.all([loadSuppliersMaybe(), loadIngredientsMaybe()]);
-      await Promise.all([loadBalances(), loadMovements()]);
+      await Promise.all([loadBalances(), loadMovements(), loadSnapshots()]);
       setOk("Datos actualizados ✔");
       setTimeout(() => setOk(null), 1200);
     } catch (e: any) {
@@ -516,7 +648,7 @@ export default function AdminStockPage() {
     setOk(null);
     try {
       await Promise.all([loadSuppliersMaybe(), loadIngredientsMaybe()]);
-      await Promise.all([loadBalances(), loadMovements()]);
+      await Promise.all([loadBalances(), loadMovements(), loadSnapshots()]);
       setOk("Actualizado ✔");
       setTimeout(() => setOk(null), 1000);
     } catch (e: any) {
@@ -580,69 +712,12 @@ export default function AdminStockPage() {
       setManualQty("1");
       setManualNote("");
 
-      await Promise.all([loadBalances(), loadMovements()]);
+      await Promise.all([loadBalances(), loadMovements(), loadSnapshots()]);
     } catch (e: any) {
       setErr(String(e?.message || "Error aplicando movimiento"));
     } finally {
       setBusy(false);
     }
-  }
-
-  function getSupplierLabel(ing: IngredientLite) {
-    const sid = ing.supplierId;
-    if (!sid) return "— Sin proveedor —";
-    const fromIng = (ing.supplierName || "").trim();
-    if (fromIng) return fromIng;
-    const s = supplierById.get(sid);
-    return s?.name || sid;
-  }
-
-  function computeSuggestedQty(balanceRow: StockBalanceRow) {
-    const ing = ingById.get(balanceRow.ingredientId);
-    const onHand = num(balanceRow.qty);
-    const minQty = Number(ing?.minQty ?? 0) || 0;
-    const idealQty = Number(ing?.idealQty ?? 0) || 0;
-
-    // sugerimos por mínimo si existe, sino por ideal si existe
-    const target = minQty > 0 ? minQty : idealQty > 0 ? idealQty : 0;
-    if (target <= 0) return 0;
-    const need = Math.max(0, target - onHand);
-    return Number.isFinite(need) ? need : 0;
-  }
-
-  function addToCartFromRow(r: StockBalanceRow) {
-    const ing = ingById.get(r.ingredientId);
-    if (!ing) return;
-
-    const supplierId = String(ing.supplierId ?? "").trim();
-    if (!supplierId) {
-      setErr("Este ingrediente no tiene supplierId asignado. Asignalo para poder pedir.");
-      return;
-    }
-
-    const supplierName = getSupplierLabel(ing);
-
-    const suggested = computeSuggestedQty(r);
-    const unit = (ing.baseUnit ?? r.unit ?? "UNIT") as Unit;
-
-    const item: CartItem = {
-      ingredientId: ing.id,
-      ingredientName: ing.displayName || ing.name || ing.id,
-      supplierId,
-      supplierName,
-      unit,
-      qty: suggested > 0 ? String(suggested) : "1",
-      suggested,
-      note: null,
-      name_for_supplier: ing.name_for_supplier ?? null,
-      approxUnitCost: num(ing.lastCost),
-      currency: ing.currency ?? "ARS",
-    };
-
-    upsertCartItem(item);
-    setCartOpen(true);
-    setOk("Agregado al pedido ✔");
-    setTimeout(() => setOk(null), 900);
   }
 
   async function confirmOrders() {
@@ -653,7 +728,6 @@ export default function AdminStockPage() {
 
     if (cartBySupplier.length === 0) return;
 
-    // validación rápida
     for (const g of cartBySupplier) {
       const valid = g.items.some((it) => num(it.qty) > 0);
       if (!valid) {
@@ -665,7 +739,6 @@ export default function AdminStockPage() {
     setBusy(true);
     setErr(null);
     try {
-      // Creamos 1 PO por proveedor
       for (const g of cartBySupplier) {
         const itemsPayload = g.items
           .map((it) => ({
@@ -727,8 +800,8 @@ export default function AdminStockPage() {
               </div>
 
               <p className="mt-1 text-sm text-zinc-500">
-                Balance por ingrediente + auditoría de movimientos. Ahora también
-                podés armar pedidos a proveedores desde alertas.
+                Balance por ingrediente + auditoría de movimientos + snapshots del
+                conteo diario.
               </p>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -760,6 +833,20 @@ export default function AdminStockPage() {
                   Movimientos
                 </button>
 
+                <button
+                  type="button"
+                  className={cn(
+                    "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
+                    tab === "snapshots"
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+                  )}
+                  onClick={() => setTab("snapshots")}
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Snapshots
+                </button>
+
                 {onlyLow && tab === "balance" && (
                   <Pill tone="warn">Mostrando solo bajos</Pill>
                 )}
@@ -767,7 +854,7 @@ export default function AdminStockPage() {
             </div>
 
             <div className="min-w-[280px]">
-              <Field label="Fecha (para movimientos)">
+              <Field label="Fecha">
                 <Input
                   type="date"
                   value={dateKey}
@@ -800,14 +887,18 @@ export default function AdminStockPage() {
         {/* 🛒 Cart Drawer */}
         {cartOpen && (
           <div className="fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-black/30" onClick={() => setCartOpen(false)} />
+            <div
+              className="absolute inset-0 bg-black/30"
+              onClick={() => setCartOpen(false)}
+            />
 
             <div className="absolute right-0 top-0 h-full w-full max-w-3xl bg-white shadow-xl">
               <div className="flex items-center justify-between border-b px-5 py-4">
                 <div>
                   <div className="text-xs text-zinc-500">Pedido desde Stock</div>
                   <div className="text-lg font-semibold text-zinc-900">
-                    Carrito ({cartTotals.lines} ítem/s · {cartTotals.suppliers} proveedor/es)
+                    Carrito ({cartTotals.lines} ítem/s · {cartTotals.suppliers}{" "}
+                    proveedor/es)
                   </div>
                   <div className="text-sm text-zinc-600">
                     Aproximado: <b>{money(cartTotals.approxARS, "ARS")}</b>
@@ -821,7 +912,11 @@ export default function AdminStockPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" onClick={clearCart} disabled={busy || cartList.length === 0}>
+                  <Button
+                    variant="secondary"
+                    onClick={clearCart}
+                    disabled={busy || cartList.length === 0}
+                  >
                     Vaciar
                   </Button>
                   <Button variant="secondary" onClick={() => setCartOpen(false)}>
@@ -834,16 +929,24 @@ export default function AdminStockPage() {
               <div className="h-[calc(100%-64px)] overflow-y-auto p-5 space-y-6">
                 {cartBySupplier.length === 0 ? (
                   <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700">
-                    No hay ítems. En la tabla de Balance tocá <b>“Agregar a pedido”</b>.
+                    No hay ítems. En la tabla de Balance tocá{" "}
+                    <b>“Agregar a pedido”</b>.
                   </div>
                 ) : (
                   cartBySupplier.map((g) => (
-                    <div key={g.supplierId} className="rounded-2xl border border-zinc-200 overflow-hidden">
+                    <div
+                      key={g.supplierId}
+                      className="rounded-2xl border border-zinc-200 overflow-hidden"
+                    >
                       <div className="flex items-center justify-between bg-zinc-50 px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Truck className="h-4 w-4 text-zinc-500" />
-                          <div className="font-semibold text-zinc-900">{g.supplierName}</div>
-                          <div className="text-xs text-zinc-500">({g.items.length} ítem/s)</div>
+                          <div className="font-semibold text-zinc-900">
+                            {g.supplierName}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            ({g.items.length} ítem/s)
+                          </div>
                         </div>
                       </div>
 
@@ -875,11 +978,18 @@ export default function AdminStockPage() {
                               const curr = it.currency ?? "ARS";
 
                               return (
-                                <tr key={cartKey(it.ingredientId, it.supplierId)} className="hover:bg-zinc-50">
+                                <tr
+                                  key={cartKey(it.ingredientId, it.supplierId)}
+                                  className="hover:bg-zinc-50"
+                                >
                                   <td className="px-4 py-3 text-sm">
-                                    <div className="font-semibold text-zinc-900">{it.ingredientName}</div>
+                                    <div className="font-semibold text-zinc-900">
+                                      {it.ingredientName}
+                                    </div>
                                     <div className="text-xs text-zinc-500">
-                                      {it.name_for_supplier ? `Prov: ${it.name_for_supplier} · ` : ""}
+                                      {it.name_for_supplier
+                                        ? `Prov: ${it.name_for_supplier} · `
+                                        : ""}
                                       {it.ingredientId}
                                     </div>
                                   </td>
@@ -907,7 +1017,9 @@ export default function AdminStockPage() {
                                   <td className="px-4 py-3 text-sm text-zinc-700">
                                     {line > 0 ? (
                                       <div>
-                                        <div className="font-semibold text-zinc-900">{money(line, curr)}</div>
+                                        <div className="font-semibold text-zinc-900">
+                                          {money(line, curr)}
+                                        </div>
                                         <div className="text-xs text-zinc-500">
                                           {money(u, curr)} / {it.unit}
                                         </div>
@@ -920,7 +1032,12 @@ export default function AdminStockPage() {
                                   <td className="px-4 py-3 text-right">
                                     <Button
                                       variant="secondary"
-                                      onClick={() => removeCartItem(it.ingredientId, it.supplierId)}
+                                      onClick={() =>
+                                        removeCartItem(
+                                          it.ingredientId,
+                                          it.supplierId
+                                        )
+                                      }
                                       disabled={busy}
                                     >
                                       Quitar
@@ -938,10 +1055,14 @@ export default function AdminStockPage() {
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-xs text-zinc-500">
-                    Confirmar crea <b>1 pedido por proveedor</b> (estado DRAFT) en <code>/purchase-orders</code>.
+                    Confirmar crea <b>1 pedido por proveedor</b> (estado DRAFT) en{" "}
+                    <code>/purchase-orders</code>.
                   </div>
 
-                  <Button onClick={confirmOrders} disabled={busy || cartBySupplier.length === 0 || !canWrite}>
+                  <Button
+                    onClick={confirmOrders}
+                    disabled={busy || cartBySupplier.length === 0 || !canWrite}
+                  >
                     Confirmar pedidos
                   </Button>
                 </div>
@@ -1000,7 +1121,7 @@ export default function AdminStockPage() {
                     </div>
 
                     <div className="text-xs text-zinc-500">
-                      Tip: usá el botón <b>Agregar</b> en la tabla para armar el pedido.
+                      Tip: usá el botón <b>Agregar</b> para armar el pedido.
                     </div>
                   </div>
                 </CardBody>
@@ -1025,6 +1146,10 @@ export default function AdminStockPage() {
                         <span>Proveedores en carrito</span>
                         <b>{cartTotals.suppliers}</b>
                       </div>
+                      <div className="flex items-center justify-between">
+                        <span>Snapshots (fecha)</span>
+                        <b>{snapshots.length}</b>
+                      </div>
                     </div>
                   )}
                 </CardBody>
@@ -1045,8 +1170,9 @@ export default function AdminStockPage() {
                     </Button>
 
                     <div className="text-xs text-zinc-500">
-                      Confirmar crea pedidos por proveedor. Después podés entrar a Proveedores &gt; Pedidos para
-                      “ENVIADO / CONFIRMADO / RECEPCIÓN”.
+                      Confirmar crea pedidos por proveedor. Después podés entrar a
+                      Proveedores &gt; Pedidos para “ENVIADO / CONFIRMADO /
+                      RECEPCIÓN”.
                     </div>
                   </div>
                 </CardBody>
@@ -1058,7 +1184,7 @@ export default function AdminStockPage() {
               <div className="border-b border-zinc-100 px-5 py-4">
                 <h2 className="text-lg font-semibold text-zinc-900">Balance</h2>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Ahora podés agregar items al pedido (se agrupan por proveedor).
+                  Orden alfabético por ingrediente.
                 </p>
               </div>
 
@@ -1099,7 +1225,10 @@ export default function AdminStockPage() {
                   <tbody className="divide-y divide-zinc-100">
                     {loading && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-8 text-sm text-zinc-500">
+                        <td
+                          colSpan={9}
+                          className="px-4 py-8 text-sm text-zinc-500"
+                        >
                           Cargando…
                         </td>
                       </tr>
@@ -1107,7 +1236,10 @@ export default function AdminStockPage() {
 
                     {!loading && filteredBalances.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-10 text-sm text-zinc-500">
+                        <td
+                          colSpan={9}
+                          className="px-4 py-10 text-sm text-zinc-500"
+                        >
                           No hay resultados.
                         </td>
                       </tr>
@@ -1116,7 +1248,8 @@ export default function AdminStockPage() {
                     {!loading &&
                       filteredBalances.map((r) => {
                         const ing = ingById.get(r.ingredientId);
-                        const name = ing?.displayName || ing?.name || r.ingredientId;
+                        const name =
+                          ing?.displayName || ing?.name || r.ingredientId;
 
                         const minQty = Number(ing?.minQty ?? 0) || 0;
                         const isLow = minQty > 0 && num(r.qty) < minQty;
@@ -1128,20 +1261,22 @@ export default function AdminStockPage() {
 
                         const hasSupplier = Boolean(supplierId);
 
-                        const rowTone = hasSupplier ? "" : "opacity-60";
-
                         return (
                           <tr
                             key={`${r.ingredientId}::${r.unit}`}
                             className={cn(
                               "hover:bg-zinc-50",
                               isLow && "bg-rose-50 hover:bg-rose-50",
-                              rowTone
+                              !hasSupplier && "opacity-60"
                             )}
                           >
                             <td className="px-4 py-3 text-sm">
-                              <div className="font-semibold text-zinc-900">{name}</div>
-                              <div className="text-xs text-zinc-500">{r.ingredientId}</div>
+                              <div className="font-semibold text-zinc-900">
+                                {name}
+                              </div>
+                              <div className="text-xs text-zinc-500">
+                                {r.ingredientId}
+                              </div>
                               {ing?.name_for_supplier && (
                                 <div className="text-xs text-zinc-500">
                                   Prov: {ing.name_for_supplier}
@@ -1151,10 +1286,14 @@ export default function AdminStockPage() {
 
                             <td className="px-4 py-3 text-sm text-zinc-700">
                               <div className="font-semibold">{supplierName}</div>
-                              <div className="text-xs text-zinc-500">{supplierId || "—"}</div>
+                              <div className="text-xs text-zinc-500">
+                                {supplierId || "—"}
+                              </div>
                             </td>
 
-                            <td className="px-4 py-3 text-sm text-zinc-700">{r.unit}</td>
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              {r.unit}
+                            </td>
 
                             <td className="px-4 py-3 text-sm">
                               <span
@@ -1225,12 +1364,289 @@ export default function AdminStockPage() {
           </div>
         )}
 
+        {/* SNAPSHOTS */}
+        {tab === "snapshots" && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader
+                title="Stock Snapshots"
+                subtitle="Conteos diarios guardados (por proveedor)"
+              />
+              <CardBody>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <Field label="Proveedor">
+                    <Select
+                      value={snapSupplierId}
+                      onChange={(e) => {
+                        setSnapSupplierId(e.target.value);
+                        setSnapOpenId("");
+                      }}
+                      disabled={busy || loading}
+                    >
+                      <option value="">— Todos —</option>
+                      {activeSuppliers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+
+                  <Field label="Buscar ingrediente dentro del snapshot">
+                    <Input
+                      value={snapQ}
+                      onChange={(e) => setSnapQ(e.target.value)}
+                      placeholder="Ej: arroz, salmón…"
+                      disabled={busy || loading}
+                    />
+                  </Field>
+
+                  <div className="flex items-end">
+                    <Button
+                      variant="secondary"
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          await loadSnapshots();
+                          setOk("Snapshots actualizados ✔");
+                          setTimeout(() => setOk(null), 900);
+                        } catch (e: any) {
+                          setErr(String(e?.message || "Error cargando snapshots"));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      loading={busy || loading}
+                    >
+                      <RefreshCcw className="h-4 w-4" />
+                      Recargar
+                    </Button>
+                  </div>
+
+                  <div className="flex items-end justify-end text-xs text-zinc-500">
+                    Total: <b className="ml-1">{filteredSnapshots.length}</b>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+
+            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              <div className="border-b border-zinc-100 px-5 py-4">
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  Snapshots ({filteredSnapshots.length})
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Click en “Ver” para expandir items.
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead className="bg-zinc-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Proveedor
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        DateKey
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Items
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Actualizado
+                      </th>
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-zinc-100">
+                    {loading && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-sm text-zinc-500">
+                          Cargando…
+                        </td>
+                      </tr>
+                    )}
+
+                    {!loading && filteredSnapshots.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-10 text-sm text-zinc-500">
+                          No hay snapshots para esta fecha/filtro.
+                        </td>
+                      </tr>
+                    )}
+
+                    {!loading &&
+                      filteredSnapshots.map((s) => {
+                        const open = snapOpenId === s.id;
+                        const supplierName = getSupplierLabelById(s.supplierId);
+
+                        // items filtrados por búsqueda
+                        const q = snapQ.trim().toLowerCase();
+                        const items = (s.items ?? []).filter((it) => {
+                          if (!q) return true;
+                          const ing = ingById.get(it.productId);
+                          const name =
+                            (ing?.displayName || ing?.name || it.productId) ?? "";
+                          return (
+                            it.productId.toLowerCase().includes(q) ||
+                            name.toLowerCase().includes(q)
+                          );
+                        });
+
+                        // orden alfabético por ingrediente (por nombre)
+                        items.sort((a, b) => {
+                          const ia = ingById.get(a.productId);
+                          const ib = ingById.get(b.productId);
+                          const na = (ia?.displayName || ia?.name || a.productId).toLowerCase();
+                          const nb = (ib?.displayName || ib?.name || b.productId).toLowerCase();
+                          return na.localeCompare(nb);
+                        });
+
+                        return (
+                          <React.Fragment key={s.id}>
+                            <tr className="hover:bg-zinc-50">
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                <div className="font-semibold text-zinc-900">
+                                  {supplierName}
+                                </div>
+                                <div className="text-xs text-zinc-500">
+                                  {s.supplierId}
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                <div className="font-semibold text-zinc-900">
+                                  {s.dateKey}
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3 text-sm text-zinc-700">
+                                <b className="text-zinc-900">{s.items?.length ?? 0}</b>{" "}
+                                <span className="text-xs text-zinc-500">ítem/s</span>
+                              </td>
+
+                              <td className="px-4 py-3 text-sm text-zinc-600">
+                                {fmtDateTimeAR(s.updatedAt || s.createdAt || null)}
+                              </td>
+
+                              <td className="px-4 py-3 text-right">
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => setSnapOpenId(open ? "" : s.id)}
+                                  disabled={busy}
+                                >
+                                  <span className="inline-flex items-center gap-2">
+                                    <Eye className="h-4 w-4" />
+                                    {open ? "Ocultar" : "Ver"}
+                                  </span>
+                                </Button>
+                              </td>
+                            </tr>
+
+                            {open && (
+                              <tr className="bg-white">
+                                <td colSpan={5} className="px-4 py-4">
+                                  <div className="rounded-2xl border border-zinc-200 overflow-hidden">
+                                    <div className="bg-zinc-50 px-4 py-3 flex items-center justify-between">
+                                      <div className="text-sm font-semibold text-zinc-900">
+                                        Items ({items.length})
+                                      </div>
+                                      <div className="text-xs text-zinc-500">
+                                        {q ? "Filtrado por búsqueda" : "Orden alfabético"}
+                                      </div>
+                                    </div>
+
+                                    <div className="overflow-x-auto">
+                                      <table className="min-w-full">
+                                        <thead className="bg-white">
+                                          <tr>
+                                            <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                                              Ingrediente
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                                              Qty
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                                              Unidad
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                                              Mínimo
+                                            </th>
+                                          </tr>
+                                        </thead>
+
+                                        <tbody className="divide-y divide-zinc-100">
+                                          {items.length === 0 && (
+                                            <tr>
+                                              <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                                                Sin items (o no matchea la búsqueda).
+                                              </td>
+                                            </tr>
+                                          )}
+
+                                          {items.map((it) => {
+                                            const ing = ingById.get(it.productId);
+                                            const name =
+                                              ing?.displayName ||
+                                              ing?.name ||
+                                              it.productId;
+
+                                            const unit =
+                                              (ing?.baseUnit ?? "") || "—";
+                                            const minQty = Number(ing?.minQty ?? 0) || 0;
+                                            const low = minQty > 0 && num(it.qty) < minQty;
+
+                                            return (
+                                              <tr key={`${s.id}::${it.productId}`} className={cn(low && "bg-amber-50")}>
+                                                <td className="px-4 py-2 text-sm">
+                                                  <div className="font-semibold text-zinc-900">{name}</div>
+                                                  <div className="text-xs text-zinc-500">{it.productId}</div>
+                                                </td>
+                                                <td className="px-4 py-2 text-sm">
+                                                  <span className={cn("font-semibold", low ? "text-amber-700" : "text-zinc-900")}>
+                                                    {num(it.qty)}
+                                                  </span>
+                                                </td>
+                                                <td className="px-4 py-2 text-sm text-zinc-700">{unit}</td>
+                                                <td className="px-4 py-2 text-sm text-zinc-700">
+                                                  {minQty > 0 ? minQty : "—"}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
+                Tip: si no aparecen, revisá que tu backend tenga el GET que devuelve
+                array cuando no pasás supplierId.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* MOVEMENTS */}
         {tab === "movements" && (
           <div className="space-y-4">
             {/* Filters */}
             <Card>
-              <CardHeader title="Movimientos" subtitle="Auditoría por fecha + filtros" />
+              <CardHeader
+                title="Movimientos"
+                subtitle="Auditoría por fecha + filtros"
+              />
               <CardBody>
                 <div className="grid gap-4 md:grid-cols-5">
                   <Field label="Ingrediente">
@@ -1270,7 +1686,8 @@ export default function AdminStockPage() {
                     <Input
                       value={movLimit}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setMovLimit(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setMovLimit(e.target.value)
                       }
                       disabled={busy || loading}
                     />
@@ -1284,7 +1701,9 @@ export default function AdminStockPage() {
                         try {
                           await loadMovements();
                         } catch (e: any) {
-                          setErr(String(e?.message || "Error cargando movimientos"));
+                          setErr(
+                            String(e?.message || "Error cargando movimientos")
+                          );
                         } finally {
                           setBusy(false);
                         }
@@ -1301,7 +1720,10 @@ export default function AdminStockPage() {
 
             {/* Manual */}
             <Card>
-              <CardHeader title="Movimiento manual" subtitle="IN / OUT / ADJUST (ADMIN / MANAGER)" />
+              <CardHeader
+                title="Movimiento manual"
+                subtitle="IN / OUT / ADJUST (ADMIN / MANAGER)"
+              />
               <CardBody>
                 <div className="grid gap-4 md:grid-cols-6">
                   <Field label="Tipo">
@@ -1356,10 +1778,13 @@ export default function AdminStockPage() {
                     <Input
                       value={manualQty}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setManualQty(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setManualQty(e.target.value)
                       }
                       disabled={!canWrite || busy}
-                      placeholder={manualType === "ADJUST" ? "Ej: -2.5 / 3" : "Ej: 2.5"}
+                      placeholder={
+                        manualType === "ADJUST" ? "Ej: -2.5 / 3" : "Ej: 2.5"
+                      }
                     />
                   </Field>
 
@@ -1450,8 +1875,14 @@ export default function AdminStockPage() {
 
                     {!loading &&
                       movements.map((m) => {
-                        const ing = m.ingredientId ? ingById.get(m.ingredientId) : null;
-                        const name = ing?.displayName || ing?.name || m.ingredientId || "—";
+                        const ing = m.ingredientId
+                          ? ingById.get(m.ingredientId)
+                          : null;
+                        const name =
+                          ing?.displayName ||
+                          ing?.name ||
+                          m.ingredientId ||
+                          "—";
 
                         const tone =
                           m.type === "IN"
@@ -1466,25 +1897,35 @@ export default function AdminStockPage() {
                           <tr key={m.id} className="hover:bg-zinc-50">
                             <td className="px-4 py-3 text-sm text-zinc-600">
                               {fmtDateTimeAR(m.createdAt)}
-                              <div className="text-xs text-zinc-400">{m.dateKey}</div>
+                              <div className="text-xs text-zinc-400">
+                                {m.dateKey}
+                              </div>
                             </td>
 
                             <td className="px-4 py-3 text-sm">
                               <Pill tone={tone}>{m.type}</Pill>
                             </td>
 
-                            <td className="px-4 py-3 text-sm text-zinc-700">{m.reason}</td>
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              {m.reason}
+                            </td>
 
                             <td className="px-4 py-3 text-sm">
-                              <div className="font-semibold text-zinc-900">{name}</div>
+                              <div className="font-semibold text-zinc-900">
+                                {name}
+                              </div>
                               {m.ingredientId ? (
-                                <div className="text-xs text-zinc-500">{m.ingredientId}</div>
+                                <div className="text-xs text-zinc-500">
+                                  {m.ingredientId}
+                                </div>
                               ) : null}
                             </td>
 
                             <td className="px-4 py-3 text-sm text-zinc-900">
                               <span className="font-semibold">{num(m.qty)}</span>{" "}
-                              <span className="text-xs text-zinc-500">{m.unit ?? "—"}</span>
+                              <span className="text-xs text-zinc-500">
+                                {m.unit ?? "—"}
+                              </span>
                             </td>
 
                             <td className="px-4 py-3 text-sm text-zinc-700">
@@ -1493,14 +1934,18 @@ export default function AdminStockPage() {
                                   <div>
                                     <b>{m.refType ?? "—"}</b>
                                   </div>
-                                  <div className="text-zinc-500">{m.refId ?? "—"}</div>
+                                  <div className="text-zinc-500">
+                                    {m.refId ?? "—"}
+                                  </div>
                                 </div>
                               ) : (
                                 "—"
                               )}
                             </td>
 
-                            <td className="px-4 py-3 text-sm text-zinc-700">{m.note || "—"}</td>
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              {m.note || "—"}
+                            </td>
                           </tr>
                         );
                       })}

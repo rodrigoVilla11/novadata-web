@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  Plus,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -34,14 +35,6 @@ function moneyARS(n: number) {
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS" });
 }
 
-function fmtTime(iso?: any) {
-  const v = toIsoLike(iso);
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
-}
-
 // tolerante para Date / ISO / EJSON {$date}
 function toIsoLike(v: any): string | null {
   if (!v) return null;
@@ -52,6 +45,14 @@ function toIsoLike(v: any): string | null {
     if (typeof v.$date === "number") return new Date(v.$date).toISOString();
   }
   return null;
+}
+
+function fmtTime(iso?: any) {
+  const v = toIsoLike(iso);
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtDateTime(v?: any) {
@@ -110,14 +111,33 @@ type SummaryResponse = {
   }[];
 };
 
+type ProductionStatus = "PENDING" | "DONE";
+
+type ProductionNote = {
+  text: string;
+  createdAt: string | null;
+  createdBy: string | null;
+  createdByName?: string | null;
+};
+
 type ProductionRow = {
   id: string;
   dateKey: string;
-  at?: any; // ✅ ahora tolerante
+
+  // backend puede mandar at/performedAt + time
+  at?: any;
+  performedAt?: any;
+  time?: string | null;
+
+  status?: ProductionStatus;
+  isDone?: boolean;
+  doneAt?: string | null;
+
   taskName?: string | null;
   taskId?: string | null;
-  area?: string | null; // ✅ si backend lo manda
-  notes?: string | null;
+  area?: string | null;
+
+  notes?: ProductionNote[]; // ✅ array
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -131,6 +151,11 @@ function AreaPill({ area }: { area?: string | null }) {
       {area}
     </span>
   );
+}
+
+function lastNoteText(notes?: ProductionNote[]) {
+  if (!Array.isArray(notes) || notes.length === 0) return "";
+  return String(notes[notes.length - 1]?.text ?? "").trim();
 }
 
 export default function UserPanelPage() {
@@ -153,7 +178,19 @@ export default function UserPanelPage() {
 
   // UX toggles
   const [qTasks, setQTasks] = useState("");
-  const [openDays, setOpenDays] = useState<Record<string, boolean>>({}); // accordion days
+  const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
+
+  // per-row note/done
+  const [noteDraftById, setNoteDraftById] = useState<Record<string, string>>(
+    {}
+  );
+  const [noteBusyId, setNoteBusyId] = useState<string | null>(null);
+  const [doneBusyId, setDoneBusyId] = useState<string | null>(null);
+
+  // ✅ acordeón por fila (notas)
+  const [openNotesByRow, setOpenNotesByRow] = useState<Record<string, boolean>>(
+    {}
+  );
 
   async function loadAll() {
     setError(null);
@@ -178,7 +215,15 @@ export default function UserPanelPage() {
           week.from
         )}&to=${encodeURIComponent(week.to)}&limit=200`
       );
-      setProd(p);
+
+      const normalized = Array.isArray(p)
+        ? p.map((r: any) => ({
+            ...r,
+            notes: Array.isArray(r.notes) ? r.notes : [],
+          }))
+        : [];
+
+      setProd(normalized);
     } catch (e: any) {
       setError(e?.message || "Error cargando panel");
     } finally {
@@ -205,7 +250,15 @@ export default function UserPanelPage() {
           week.from
         )}&to=${encodeURIComponent(week.to)}&limit=200`
       );
-      setProd(p);
+
+      const normalized = Array.isArray(p)
+        ? p.map((r: any) => ({
+            ...r,
+            notes: Array.isArray(r.notes) ? r.notes : [],
+          }))
+        : [];
+
+      setProd(normalized);
 
       setOkMsg("Actualizado ✔");
       window.setTimeout(() => setOkMsg(null), 2500);
@@ -279,6 +332,92 @@ export default function UserPanelPage() {
     }
   }
 
+  // ✅ marcar hecha/pendiente (mismo endpoint que admin, pero el backend debe permitirlo para el dueño)
+  async function toggleDone(r: ProductionRow) {
+    const isDone = Boolean(r.isDone) || r.status === "DONE";
+    const next = !isDone;
+
+    setError(null);
+    setOkMsg(null);
+    setDoneBusyId(r.id);
+
+    // ✅ Optimista: reflejar al instante
+    setProd((prev) =>
+      prev.map((p) =>
+        p.id === r.id
+          ? {
+              ...p,
+              isDone: next,
+              status: next ? "DONE" : "PENDING",
+              doneAt: next ? new Date().toISOString() : null,
+            }
+          : p
+      )
+    );
+
+    try {
+      await apiFetchAuthed(getAccessToken, `/production/${r.id}/done`, {
+        method: "PATCH",
+        body: JSON.stringify({ done: next }),
+      });
+
+      // refrescamos por si el backend recalcula cosas
+      await refreshWeekOnly();
+
+      setOkMsg(
+        next ? "Tarea marcada como hecha ✔" : "Tarea marcada como pendiente ✔"
+      );
+      window.setTimeout(() => setOkMsg(null), 2000);
+    } catch (e: any) {
+      // ❗ rollback si falla
+      setProd((prev) =>
+        prev.map((p) =>
+          p.id === r.id
+            ? {
+                ...p,
+                isDone: isDone,
+                status: isDone ? "DONE" : "PENDING",
+                doneAt: isDone ? p.doneAt ?? new Date().toISOString() : null,
+              }
+            : p
+        )
+      );
+
+      setError(e?.message || "Error marcando estado");
+    } finally {
+      setDoneBusyId(null);
+    }
+  }
+
+  // ✅ agregar nota (sin cancelar desde acá)
+  async function addNote(rowId: string) {
+    const text = (noteDraftById[rowId] ?? "").trim();
+    if (!text) return;
+
+    setError(null);
+    setOkMsg(null);
+    setNoteBusyId(rowId);
+    try {
+      await apiFetchAuthed(getAccessToken, `/production/${rowId}/notes`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+
+      setNoteDraftById((m) => ({ ...m, [rowId]: "" }));
+
+      // ✅ auto abrir acordeón para ver la nota recién agregada
+      setOpenNotesByRow((m) => ({ ...m, [rowId]: true }));
+
+      await refreshWeekOnly();
+      setOkMsg("Nota agregada ✔");
+      window.setTimeout(() => setOkMsg(null), 2000);
+    } catch (e: any) {
+      setError(e?.message || "Error agregando nota");
+    } finally {
+      setNoteBusyId(null);
+    }
+  }
+
   // Agrupar tareas por día
   const prodByDay = useMemo(() => {
     const map = new Map<string, ProductionRow[]>();
@@ -289,7 +428,7 @@ export default function UserPanelPage() {
     }
     const entries = [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
 
-    // abrir por defecto "hoy" si existe (si no, el primer día)
+    // abrir por defecto "hoy" si existe
     const nextOpen: Record<string, boolean> = {};
     const hasToday = entries.some(([dk]) => dk === dateKey);
     const defaultKey = hasToday ? dateKey : entries[0]?.[0];
@@ -310,9 +449,10 @@ export default function UserPanelPage() {
     return prodByDay
       .map(([dk, rows]) => {
         const filtered = rows.filter((r) => {
-          const hay = `${r.taskName ?? ""} ${r.taskId ?? ""} ${r.notes ?? ""} ${
+          const notesText = (r.notes || []).map((n) => n.text).join(" ");
+          const hay = `${r.taskName ?? ""} ${r.taskId ?? ""} ${notesText} ${
             r.area ?? ""
-          }`.toLowerCase();
+          } ${r.status ?? ""}`.toLowerCase();
           return hay.includes(q);
         });
         return [dk, filtered] as const;
@@ -323,25 +463,35 @@ export default function UserPanelPage() {
   const quickStats = useMemo(() => {
     const totalTasks = prod.length;
     const daysWithWork = new Set(prod.map((p) => p.dateKey)).size;
-    return { totalTasks, daysWithWork };
+    const done = prod.filter(
+      (p) => Boolean(p.isDone) || p.status === "DONE"
+    ).length;
+    return { totalTasks, daysWithWork, done };
   }, [prod]);
 
   function taskLabel(r: ProductionRow) {
-    // ✅ backend ideal: taskName viene poblado
     const name = (r.taskName ?? "").trim();
     if (name) return name;
-    // fallback: mostrar un label humano si solo hay id
     const id = (r.taskId ?? "").trim();
     return id ? `Tarea (${id.slice(0, 6)}…${id.slice(-4)})` : "—";
   }
 
+  function rowMoment(r: ProductionRow) {
+    return r.performedAt ?? r.at ?? null;
+  }
+
+  function rowTimeLabel(r: ProductionRow) {
+    const t = String(r.time ?? "").trim();
+    if (t) return t;
+    return fmtTime(rowMoment(r));
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50">
-      {/* Top Gourmetify Header */}
+      {/* Header */}
       <div className="sticky top-0 z-20 border-b border-zinc-200 bg-white/85 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            {/* Left */}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-bold text-zinc-900 md:text-2xl">
@@ -391,7 +541,7 @@ export default function UserPanelPage() {
                     <span className="font-semibold text-zinc-800">
                       {me.employee.fullName}
                     </span>
-                    . Registrá entrada/salida y revisá tus tareas de la semana.
+                    . Registrá entrada/salida y revisá tus tareas.
                   </>
                 ) : (
                   "Entrada / salida + horas y tareas (solo tus datos)."
@@ -414,7 +564,6 @@ export default function UserPanelPage() {
               )}
             </div>
 
-            {/* Right actions */}
             <div className="flex flex-wrap items-end gap-2">
               <div className="min-w-[220px]">
                 <Field label="Día">
@@ -469,7 +618,7 @@ export default function UserPanelPage() {
 
       {/* Content */}
       <div className="mx-auto max-w-5xl px-4 py-6 pb-28 space-y-6">
-        {/* Today — action cards */}
+        {/* Today cards */}
         <div className="grid gap-4 md:grid-cols-12">
           <div className="md:col-span-8">
             <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -479,7 +628,7 @@ export default function UserPanelPage() {
                     Hoy • {dateKey}
                   </div>
                   <div className="mt-1 text-sm text-zinc-500">
-                    Registrá tu jornada. Si falta salida, te lo marca.
+                    Registrá tu jornada.
                   </div>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700">
@@ -593,15 +742,24 @@ export default function UserPanelPage() {
                       {quickStats.totalTasks}
                     </span>
                   </div>
+                  <div className="mt-2 flex items-center justify-between text-sm">
+                    <span className="text-zinc-600">Hechas</span>
+                    <span className="font-semibold text-zinc-900">
+                      {quickStats.done}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Week days: hours per day */}
+        {/* Week days */}
         <Card>
-          <CardHeader title="Detalle de días" subtitle="Horas por día (semana)" />
+          <CardHeader
+            title="Detalle de días"
+            subtitle="Horas por día (semana)"
+          />
           <CardBody>
             {!summary ? (
               <div className="text-sm text-zinc-500">Cargando…</div>
@@ -686,7 +844,7 @@ export default function UserPanelPage() {
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Producción registrada por día.
+                  Podés marcar hechas y agregar notas.
                 </p>
               </div>
 
@@ -763,47 +921,223 @@ export default function UserPanelPage() {
                                 Tarea
                               </th>
                               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                Estado
+                              </th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
                                 Notas
                               </th>
                             </tr>
                           </thead>
+
                           <tbody className="divide-y divide-zinc-100">
                             {rows
                               .slice()
-                              // ✅ ordenar por fecha real si existe, si no por string
                               .sort((a, b) => {
-                                const ta = new Date(toIsoLike(a.at) ?? 0).getTime();
-                                const tb = new Date(toIsoLike(b.at) ?? 0).getTime();
-                                if (Number.isFinite(tb - ta) && (tb - ta) !== 0) return tb - ta;
-                                return String(b.at ?? "").localeCompare(String(a.at ?? ""));
+                                const ta = new Date(
+                                  toIsoLike(rowMoment(a)) ?? 0
+                                ).getTime();
+                                const tb = new Date(
+                                  toIsoLike(rowMoment(b)) ?? 0
+                                ).getTime();
+                                if (Number.isFinite(tb - ta) && tb !== ta)
+                                  return tb - ta;
+                                return String(rowMoment(b) ?? "").localeCompare(
+                                  String(rowMoment(a) ?? "")
+                                );
                               })
-                              .map((r) => (
-                                <tr key={r.id} className="hover:bg-zinc-50/60">
-                                  <td className="px-4 py-3 text-sm text-zinc-700 whitespace-nowrap">
-                                    {fmtDateTime(r.at)}
-                                  </td>
+                              .map((r) => {
+                                const isDone =
+                                  Boolean(r.isDone) || r.status === "DONE";
+                                const notes = Array.isArray(r.notes)
+                                  ? r.notes
+                                  : [];
+                                const count = notes.length;
+                                const last = lastNoteText(notes);
+                                const isNotesOpen = Boolean(
+                                  openNotesByRow[r.id]
+                                );
 
-                                  <td className="px-4 py-3">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="text-sm font-semibold text-zinc-900">
-                                        {taskLabel(r)}
+                                return (
+                                  <tr
+                                    key={r.id}
+                                    className="hover:bg-zinc-50/60 align-top"
+                                  >
+                                    <td className="px-4 py-3 text-sm text-zinc-700 whitespace-nowrap">
+                                      <div className="font-semibold text-zinc-900">
+                                        {rowTimeLabel(r)}
                                       </div>
-                                      <AreaPill area={r.area ?? null} />
-                                    </div>
-
-                                    {/* ✅ si no hay taskName y sólo hay id, mostrás el id completo en chiquito */}
-                                    {!((r.taskName ?? "").trim()) && (r.taskId ?? "").trim() && (
-                                      <div className="mt-0.5 text-xs text-zinc-500">
-                                        ID: {r.taskId}
+                                      <div className="text-xs text-zinc-500">
+                                        {fmtDateTime(rowMoment(r))}
                                       </div>
-                                    )}
-                                  </td>
+                                    </td>
 
-                                  <td className="px-4 py-3 text-sm text-zinc-700">
-                                    {r.notes?.trim() ? r.notes : "—"}
-                                  </td>
-                                </tr>
-                              ))}
+                                    <td className="px-4 py-3">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="text-sm font-semibold text-zinc-900">
+                                          {taskLabel(r)}
+                                        </div>
+                                        <AreaPill area={r.area ?? null} />
+                                      </div>
+
+                                      {!(r.taskName ?? "").trim() &&
+                                        (r.taskId ?? "").trim() && (
+                                          <div className="mt-0.5 text-xs text-zinc-500">
+                                            ID: {r.taskId}
+                                          </div>
+                                        )}
+                                    </td>
+
+                                    <td className="px-4 py-3">
+                                      <div className="flex flex-col gap-2">
+                                        <span
+                                          className={cn(
+                                            "inline-flex w-fit items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                            isDone
+                                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                              : "border-zinc-200 bg-zinc-50 text-zinc-700"
+                                          )}
+                                        >
+                                          {isDone ? "HECHA" : "PENDIENTE"}
+                                        </span>
+
+                                        <Button
+                                          disabled={busy || doneBusyId === r.id}
+                                          loading={doneBusyId === r.id}
+                                          onClick={() => toggleDone(r)}
+                                        >
+                                          {isDone
+                                            ? "Marcar pendiente"
+                                            : "Marcar hecha"}
+                                        </Button>
+                                      </div>
+                                    </td>
+
+                                    {/* ✅ Notas con acordeón por fila */}
+                                    <td className="px-4 py-3 text-sm text-zinc-700">
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="text-xs text-zinc-500">
+                                            {count > 0
+                                              ? `${count} nota${
+                                                  count === 1 ? "" : "s"
+                                                }`
+                                              : "Sin notas"}
+                                          </div>
+
+                                          {count > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setOpenNotesByRow((m) => ({
+                                                  ...m,
+                                                  [r.id]: !Boolean(m[r.id]),
+                                                }))
+                                              }
+                                              className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-700 hover:text-zinc-900"
+                                            >
+                                              {isNotesOpen ? (
+                                                <>
+                                                  Ocultar{" "}
+                                                  <ChevronUp className="h-4 w-4" />
+                                                </>
+                                              ) : (
+                                                <>
+                                                  Ver todas{" "}
+                                                  <ChevronDown className="h-4 w-4" />
+                                                </>
+                                              )}
+                                            </button>
+                                          )}
+                                        </div>
+
+                                        {/* Preview última nota */}
+                                        {count > 0 && !isNotesOpen && (
+                                          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                                            {last || "—"}
+                                          </div>
+                                        )}
+
+                                        {/* Acordeón: listado completo */}
+                                        {count > 0 && isNotesOpen && (
+                                          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                            <ul className="space-y-2">
+                                              {notes.map((n, idx) => (
+                                                <li
+                                                  key={idx}
+                                                  className="text-sm text-zinc-800"
+                                                >
+                                                  <div className="flex items-center justify-between gap-2">
+                                                    <span className="font-semibold text-zinc-900">
+                                                      {n.createdByName ?? "—"}
+                                                    </span>
+                                                    <span className="text-xs text-zinc-500">
+                                                      {n.createdAt
+                                                        ? fmtDateTime(
+                                                            n.createdAt
+                                                          )
+                                                        : "—"}
+                                                    </span>
+                                                  </div>
+                                                  <div className="mt-1 whitespace-pre-wrap text-zinc-700">
+                                                    {n.text}
+                                                  </div>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </div>
+                                        )}
+
+                                        {/* Input agregar nota */}
+                                        <div className="flex items-center gap-2">
+                                          <Input
+                                            value={noteDraftById[r.id] ?? ""}
+                                            onChange={(e) =>
+                                              setNoteDraftById((m) => ({
+                                                ...m,
+                                                [r.id]: e.target.value,
+                                              }))
+                                            }
+                                            placeholder="Agregar nota…"
+                                            disabled={
+                                              busy || noteBusyId === r.id
+                                            }
+                                            onKeyDown={(e) => {
+                                              if (
+                                                e.key === "Enter" &&
+                                                (e.ctrlKey || e.metaKey)
+                                              ) {
+                                                addNote(r.id);
+                                              }
+                                            }}
+                                          />
+                                          <Button
+                                            variant="secondary"
+                                            disabled={
+                                              busy ||
+                                              noteBusyId === r.id ||
+                                              !(
+                                                noteDraftById[r.id] ?? ""
+                                              ).trim()
+                                            }
+                                            loading={noteBusyId === r.id}
+                                            onClick={() => addNote(r.id)}
+                                          >
+                                            <span className="inline-flex items-center gap-2">
+                                              <Plus className="h-4 w-4" />
+                                              Nota
+                                            </span>
+                                          </Button>
+                                        </div>
+
+                                        <div className="text-[11px] text-zinc-500">
+                                          Tip: Ctrl/⌘ + Enter para guardar la
+                                          nota.
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                           </tbody>
                         </table>
                       </div>
@@ -843,7 +1177,9 @@ export default function UserPanelPage() {
               <Button
                 variant="secondary"
                 onClick={checkOut}
-                disabled={busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt}
+                disabled={
+                  busy || !todayRow?.checkInAt || !!todayRow?.checkOutAt
+                }
                 loading={busy}
               >
                 Salida

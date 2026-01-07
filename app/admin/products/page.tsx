@@ -11,7 +11,6 @@ import {
   RefreshCcw,
   Search,
   Plus,
-  Save,
   Power,
   CheckCircle2,
   AlertTriangle,
@@ -265,12 +264,11 @@ export default function AdminProductsPage() {
   const [isSellable, setIsSellable] = useState(true);
   const [isProduced, setIsProduced] = useState(true);
 
-  // item adder with supplier filter
-  const [supplierFilterForAdder, setSupplierFilterForAdder] = useState<string>(""); // "" = all
-  const [addType, setAddType] = useState<ProductItemType>("INGREDIENT");
-  const [addRefId, setAddRefId] = useState<string>("");
+  // item adder (GLOBAL search: ingredients + preparations)
+  const [addPickId, setAddPickId] = useState<string>(""); // "I:<id>" | "P:<id>"
   const [addQty, setAddQty] = useState<string>("1");
   const [addNote, setAddNote] = useState<string>("");
+  const [addSearch, setAddSearch] = useState<string>("");
 
   const [itemsDraft, setItemsDraft] = useState<ProductItemDraft[]>([]);
 
@@ -278,7 +276,10 @@ export default function AdminProductsPage() {
     () =>
       (categories || [])
         .filter((c) => c.isActive !== false)
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name)),
+        .sort(
+          (a, b) =>
+            (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name)
+        ),
     [categories]
   );
 
@@ -297,23 +298,36 @@ export default function AdminProductsPage() {
     [preparations]
   );
 
-  const ingredientsForAdder = useMemo(() => {
-    if (!supplierFilterForAdder) return activeIngredients;
-    return activeIngredients.filter((i) => i.supplierId === supplierFilterForAdder);
-  }, [activeIngredients, supplierFilterForAdder]);
-
+  // GLOBAL options (search across all, no supplier filter)
   const addOptions = useMemo(() => {
-    if (addType === "INGREDIENT") {
-      return ingredientsForAdder.map((i) => ({
-        id: i.id,
-        label: `${i.name} · ${unitLabel(i.unit)}`,
-      }));
-    }
-    return activePreparations.map((p) => ({
-      id: p.id,
+    const supplierNameById = new Map(activeSuppliers.map((s) => [s.id, s.name]));
+
+    const ing = activeIngredients.map((i) => {
+      const sup = i.supplierId ? supplierNameById.get(i.supplierId) : null;
+      return {
+        id: `I:${i.id}`,
+        kind: "INGREDIENT" as const,
+        refId: i.id,
+        label: `${i.name} · ${unitLabel(i.unit)}${sup ? ` · ${sup}` : ""}`,
+        search: `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
+      };
+    });
+
+    const preps = activePreparations.map((p) => ({
+      id: `P:${p.id}`,
+      kind: "PREPARATION" as const,
+      refId: p.id,
       label: `${p.name} · (${p.yieldQty} ${unitLabel(p.yieldUnit)})`,
+      search: `${p.name} ${p.id}`.toLowerCase(),
     }));
-  }, [addType, ingredientsForAdder, activePreparations]);
+
+    const all = [...ing, ...preps];
+
+    const s = addSearch.trim().toLowerCase();
+    if (!s) return all;
+
+    return all.filter((o) => o.search.includes(s));
+  }, [activeIngredients, activePreparations, activeSuppliers, addSearch]);
 
   const filteredProducts = useMemo(() => {
     let base = products;
@@ -321,7 +335,8 @@ export default function AdminProductsPage() {
     if (onlyActive) base = base.filter((p) => p.isActive);
     if (sellableOnly) base = base.filter((p) => p.isSellable);
     if (producedOnly) base = base.filter((p) => p.isProduced);
-    if (categoryIdFilter) base = base.filter((p) => (p.categoryId || "") === categoryIdFilter);
+    if (categoryIdFilter)
+      base = base.filter((p) => (p.categoryId || "") === categoryIdFilter);
 
     const qq = q.trim().toLowerCase();
     if (!qq) return base;
@@ -387,7 +402,7 @@ export default function AdminProductsPage() {
    * ========================================================================== */
 
   function addItem() {
-    if (!addRefId) return;
+    if (!addPickId) return;
 
     const qty = toNum(addQty);
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -395,10 +410,16 @@ export default function AdminProductsPage() {
       return;
     }
 
+    const [prefix, refId] = addPickId.split(":");
+    const type: ProductItemType = prefix === "P" ? "PREPARATION" : "INGREDIENT";
+
     // avoid duplicates
-    const key = addType === "INGREDIENT" ? `I:${addRefId}` : `P:${addRefId}`;
+    const key = `${prefix}:${refId}`;
     const exists = itemsDraft.some((it) => {
-      const k = it.type === "INGREDIENT" ? `I:${it.ingredientId}` : `P:${it.preparationId}`;
+      const k =
+        it.type === "INGREDIENT"
+          ? `I:${it.ingredientId}`
+          : `P:${it.preparationId}`;
       return k === key;
     });
     if (exists) {
@@ -408,12 +429,12 @@ export default function AdminProductsPage() {
 
     setItemsDraft((prev) => [
       ...prev,
-      addType === "INGREDIENT"
-        ? { type: "INGREDIENT", ingredientId: addRefId, qty: String(qty), note: addNote || "" }
-        : { type: "PREPARATION", preparationId: addRefId, qty: String(qty), note: addNote || "" },
+      type === "INGREDIENT"
+        ? { type: "INGREDIENT", ingredientId: refId, qty: String(qty), note: addNote || "" }
+        : { type: "PREPARATION", preparationId: refId, qty: String(qty), note: addNote || "" },
     ]);
 
-    setAddRefId("");
+    setAddPickId("");
     setAddQty("1");
     setAddNote("");
   }
@@ -424,7 +445,9 @@ export default function AdminProductsPage() {
 
   function setItemQty(idx: number, v: string) {
     if (!isValidNumberDraft(v)) return;
-    setItemsDraft((prev) => prev.map((it, i) => (i === idx ? { ...it, qty: v } : it)));
+    setItemsDraft((prev) =>
+      prev.map((it, i) => (i === idx ? { ...it, qty: v } : it))
+    );
   }
 
   async function create() {
@@ -458,7 +481,10 @@ export default function AdminProductsPage() {
       currency,
 
       salePrice: salePrice.trim() === "" ? null : Math.max(0, toNum(salePrice)),
-      marginPct: marginPct.trim() === "" ? null : Math.max(0, Math.min(1, toNum(marginPct))),
+      marginPct:
+        marginPct.trim() === ""
+          ? null
+          : Math.max(0, Math.min(1, toNum(marginPct))),
 
       items: itemsDraft.map((it) => ({
         type: it.type,
@@ -503,6 +529,11 @@ export default function AdminProductsPage() {
       setIsSellable(true);
       setIsProduced(true);
       setItemsDraft([]);
+
+      setAddPickId("");
+      setAddQty("1");
+      setAddNote("");
+      setAddSearch("");
 
       setOk("Producto creado ✔");
       setTimeout(() => setOk(null), 1500);
@@ -594,7 +625,10 @@ export default function AdminProductsPage() {
     const unitCost = totalCost / yQty;
 
     const sp = salePrice.trim() === "" ? null : Math.max(0, toNum(salePrice));
-    const m = marginPct.trim() === "" ? null : Math.max(0, Math.min(1, toNum(marginPct)));
+    const m =
+      marginPct.trim() === ""
+        ? null
+        : Math.max(0, Math.min(1, toNum(marginPct)));
 
     const suggestedPrice = sp != null ? null : m != null ? unitCost * (1 + m) : null;
 
@@ -617,7 +651,7 @@ export default function AdminProductsPage() {
 
   return (
     <AdminProtected>
-      <div className="space-y-6">
+      <div className="space-y-6 text-zinc-500">
         {/* Header */}
         <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -790,7 +824,9 @@ export default function AdminProductsPage() {
                 <Field label="Yield Qty">
                   <Input
                     value={yieldQty}
-                    onChange={(e) => isValidNumberDraft(e.target.value) && setYieldQty(e.target.value)}
+                    onChange={(e) =>
+                      isValidNumberDraft(e.target.value) && setYieldQty(e.target.value)
+                    }
                   />
                 </Field>
 
@@ -805,14 +841,18 @@ export default function AdminProductsPage() {
                 <Field label="Waste % (0..1)">
                   <Input
                     value={wastePct}
-                    onChange={(e) => isValidNumberDraft(e.target.value) && setWastePct(e.target.value)}
+                    onChange={(e) =>
+                      isValidNumberDraft(e.target.value) && setWastePct(e.target.value)
+                    }
                   />
                 </Field>
 
                 <Field label="Extra cost">
                   <Input
                     value={extraCost}
-                    onChange={(e) => isValidNumberDraft(e.target.value) && setExtraCost(e.target.value)}
+                    onChange={(e) =>
+                      isValidNumberDraft(e.target.value) && setExtraCost(e.target.value)
+                    }
                   />
                 </Field>
 
@@ -839,7 +879,9 @@ export default function AdminProductsPage() {
                     <BadgeDollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <Input
                       value={salePrice}
-                      onChange={(e) => isValidNumberDraft(e.target.value) && setSalePrice(e.target.value)}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setSalePrice(e.target.value)
+                      }
                       className="pl-9"
                       placeholder="Si lo ponés, ignora sugerido"
                     />
@@ -851,7 +893,9 @@ export default function AdminProductsPage() {
                     <Calculator className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <Input
                       value={marginPct}
-                      onChange={(e) => isValidNumberDraft(e.target.value) && setMarginPct(e.target.value)}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setMarginPct(e.target.value)
+                      }
                       className="pl-9"
                     />
                   </div>
@@ -903,36 +947,28 @@ export default function AdminProductsPage() {
                 </Field>
               </div>
 
-              {/* Item adder */}
+              {/* Item adder (GLOBAL SEARCH) */}
               <div className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
                   <Layers className="h-4 w-4" /> Composición (items)
                 </div>
 
                 <div className="mt-3 grid gap-3 md:grid-cols-6">
-                  <Field label="Proveedor (filtro)">
-                    <Select
-                      value={supplierFilterForAdder}
-                      onChange={(e) => setSupplierFilterForAdder(e.target.value)}
-                    >
-                      <option value="">Todos</option>
-                      {activeSuppliers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </Select>
+                  <Field label="Buscar (global)">
+                    <Input
+                      value={addSearch}
+                      onChange={(e) => setAddSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !addPickId && addOptions.length) {
+                          setAddPickId(addOptions[0].id);
+                        }
+                      }}
+                      placeholder="Buscá ingrediente o preparación…"
+                    />
                   </Field>
 
-                  <Field label="Tipo">
-                    <Select value={addType} onChange={(e) => setAddType(e.target.value as any)}>
-                      <option value="INGREDIENT">Ingrediente</option>
-                      <option value="PREPARATION">Preparación</option>
-                    </Select>
-                  </Field>
-
-                  <Field label={addType === "INGREDIENT" ? "Ingrediente" : "Preparación"}>
-                    <Select value={addRefId} onChange={(e) => setAddRefId(e.target.value)}>
+                  <Field label="Item">
+                    <Select value={addPickId} onChange={(e) => setAddPickId(e.target.value)}>
                       <option value="">Seleccionar…</option>
                       {addOptions.map((o) => (
                         <option key={o.id} value={o.id}>
@@ -950,11 +986,15 @@ export default function AdminProductsPage() {
                   </Field>
 
                   <Field label="Nota">
-                    <Input value={addNote} onChange={(e) => setAddNote(e.target.value)} placeholder="Opcional" />
+                    <Input
+                      value={addNote}
+                      onChange={(e) => setAddNote(e.target.value)}
+                      placeholder="Opcional"
+                    />
                   </Field>
 
                   <div className="flex items-end">
-                    <Button variant="secondary" onClick={addItem} disabled={!addRefId}>
+                    <Button variant="secondary" onClick={addItem} disabled={!addPickId}>
                       <Plus className="h-4 w-4" />
                       Agregar
                     </Button>
@@ -1030,13 +1070,15 @@ export default function AdminProductsPage() {
                       </div>
                       <div className="text-zinc-700">
                         Precio sugerido:{" "}
-                        <b>{preview.suggestedPrice == null ? "—" : money(preview.suggestedPrice, currency)}</b>
+                        <b>
+                          {preview.suggestedPrice == null
+                            ? "—"
+                            : money(preview.suggestedPrice, currency)}
+                        </b>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-xs text-zinc-500">
-                      Agregá items para ver preview.
-                    </div>
+                    <div className="text-xs text-zinc-500">Agregá items para ver preview.</div>
                   )}
                 </div>
               </div>
@@ -1091,9 +1133,17 @@ export default function AdminProductsPage() {
                       </div>
                       {(p.sku || p.barcode) && (
                         <div className="mt-0.5 text-xs text-zinc-500">
-                          {p.sku ? <span>SKU: <b>{p.sku}</b></span> : null}
+                          {p.sku ? (
+                            <span>
+                              SKU: <b>{p.sku}</b>
+                            </span>
+                          ) : null}
                           {p.sku && p.barcode ? " · " : null}
-                          {p.barcode ? <span>BAR: <b>{p.barcode}</b></span> : null}
+                          {p.barcode ? (
+                            <span>
+                              BAR: <b>{p.barcode}</b>
+                            </span>
+                          ) : null}
                         </div>
                       )}
                       {p.tags?.length ? (
@@ -1131,11 +1181,7 @@ export default function AdminProductsPage() {
 
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="secondary"
-                          onClick={() => recompute(p)}
-                          disabled={busy}
-                        >
+                        <Button variant="secondary" onClick={() => recompute(p)} disabled={busy}>
                           <RotateCcw className="h-4 w-4" />
                           Recompute
                         </Button>
