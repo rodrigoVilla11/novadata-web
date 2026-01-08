@@ -2,6 +2,7 @@
 
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -25,6 +26,37 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** -----------------------------
+ * Helpers: JWT exp parsing
+ * ------------------------------ */
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+
+    // base64url -> base64
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+
+    // atob requiere padding en algunos casos
+    const pad = b64.length % 4;
+    const padded = pad ? b64 + "=".repeat(4 - pad) : b64;
+
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function isExpiringSoon(token: string, skewSec = 60) {
+  const p = decodeJwtPayload(token);
+  const expSec = typeof p?.exp === "number" ? p.exp : 0;
+  if (!expSec) return true;
+
+  const expMs = expSec * 1000;
+  return Date.now() >= expMs - skewSec * 1000;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -33,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ✅ evita que 5 requests disparen 5 refresh al mismo tiempo
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
-  async function login(email: string, password: string) {
+  const login = useCallback(async (email: string, password: string) => {
     const data = await apiFetch<{ access_token: string; user: User }>(
       "/auth/login",
       {
@@ -44,18 +76,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setAccessToken(data.access_token);
     setUser(data.user);
-  }
+  }, []);
 
-  async function refresh(): Promise<string | null> {
+  const refresh = useCallback(async (): Promise<string | null> => {
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
 
     refreshPromiseRef.current = (async () => {
       try {
         const data = await apiFetch<{ access_token: string; user: User }>(
           "/auth/refresh",
-          {
-            method: "POST",
-          }
+          { method: "POST" }
         );
         setAccessToken(data.access_token);
         setUser(data.user);
@@ -70,31 +100,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
 
     return refreshPromiseRef.current;
-  }
+  }, []);
 
-  async function logout() {
+  const logout = useCallback(async () => {
     await apiFetch("/auth/logout", { method: "POST" });
     setAccessToken(null);
     setUser(null);
-  }
+  }, []);
 
-  async function getAccessToken() {
-    // si ya hay token, usarlo
-    if (accessToken) return accessToken;
-    // si no hay (reload), intentamos refresh por cookie
+  const getAccessToken = useCallback(async () => {
+    // ✅ Si hay token pero está vencido o por vencer → refresh por cookie
+    if (accessToken && !isExpiringSoon(accessToken, 60)) return accessToken;
+
+    // ✅ Si no hay token (reload) o está vencido → refresh
     return await refresh();
-  }
+  }, [accessToken, refresh]);
+
+  // ✅ Setear getter estable (memoizado) para tu baseApi/RTK
   useEffect(() => {
     setTokenGetter(getAccessToken);
   }, [getAccessToken]);
 
+  // ✅ Restaurar sesión al iniciar (cookie refresh_token)
   useEffect(() => {
     (async () => {
-      await refresh(); // intenta restaurar sesión por cookie
+      await refresh();
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]);
 
   const value = useMemo(
     () => ({
@@ -106,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       getAccessToken,
     }),
-    [user, accessToken, loading]
+    [user, accessToken, loading, login, refresh, logout, getAccessToken]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
