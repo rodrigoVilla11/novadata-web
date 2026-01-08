@@ -105,18 +105,38 @@ function StatusPill({ active }: { active: boolean }) {
 
 function OrderStatusPill({ status }: { status: PurchaseOrderStatus }) {
   const map: Record<PurchaseOrderStatus, { label: string; cls: string }> = {
-    DRAFT: { label: "BORRADOR", cls: "bg-zinc-100 text-zinc-700 border-zinc-200" },
+    DRAFT: {
+      label: "BORRADOR",
+      cls: "bg-zinc-100 text-zinc-700 border-zinc-200",
+    },
     SENT: { label: "ENVIADO", cls: "bg-blue-50 text-blue-700 border-blue-200" },
-    CONFIRMED: { label: "CONFIRMADO", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-    RECEIVED_PARTIAL: { label: "RECIBIDO PARCIAL", cls: "bg-amber-50 text-amber-700 border-amber-200" },
-    RECEIVED: { label: "RECIBIDO", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    CANCELLED: { label: "CANCELADO", cls: "bg-red-50 text-red-700 border-red-200" },
+    CONFIRMED: {
+      label: "CONFIRMADO",
+      cls: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    },
+    RECEIVED_PARTIAL: {
+      label: "RECIBIDO PARCIAL",
+      cls: "bg-amber-50 text-amber-700 border-amber-200",
+    },
+    RECEIVED: {
+      label: "RECIBIDO",
+      cls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+    CANCELLED: {
+      label: "CANCELADO",
+      cls: "bg-red-50 text-red-700 border-red-200",
+    },
   };
 
   const it = map[status] ?? map.DRAFT;
 
   return (
-    <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border", it.cls)}>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border",
+        it.cls
+      )}
+    >
       {it.label}
     </span>
   );
@@ -163,6 +183,18 @@ function prettyIngredientName(i: IngredientLite) {
   return (i.displayName || i.name || "").trim();
 }
 
+function isOrderClosed(status: PurchaseOrderStatus) {
+  return status === "RECEIVED" || status === "CANCELLED";
+}
+
+function canReceive(status: PurchaseOrderStatus) {
+  return (
+    status === "SENT" ||
+    status === "CONFIRMED" ||
+    status === "RECEIVED_PARTIAL"
+  );
+}
+
 function IngredientPicker({
   open,
   onClose,
@@ -185,8 +217,6 @@ function IngredientPicker({
     setLoading(true);
     setErr(null);
     try {
-      // ✅ Asumimos endpoint /ingredients que devuelve [{id,name,displayName,baseUnit,supplierId,name_for_supplier,cost}]
-      // Si tu endpoint es distinto, cambiá esta URL.
       const url = `/ingredients?limit=200&supplierId=${encodeURIComponent(
         supplier.id
       )}${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ""}`;
@@ -300,13 +330,13 @@ function IngredientPicker({
                         {ing.baseUnit || "—"}
                       </td>
                       <td className="px-4 py-3 text-sm text-zinc-700">
-                        {money(ing.cost?.lastCost ?? 0, ing.cost?.currency ?? "ARS")}
+                        {money(
+                          ing.cost?.lastCost ?? 0,
+                          ing.cost?.currency ?? "ARS"
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button
-                          onClick={() => onPick(ing)}
-                          variant="secondary"
-                        >
+                        <Button onClick={() => onPick(ing)} variant="secondary">
                           Elegir
                         </Button>
                       </td>
@@ -317,7 +347,8 @@ function IngredientPicker({
           </div>
 
           <div className="text-xs text-zinc-500">
-            Si tu endpoint de ingredientes no soporta <b>supplierId</b> o <b>q</b>, decime y lo adapto a tu API real.
+            Si tu endpoint de ingredientes no soporta <b>supplierId</b> o{" "}
+            <b>q</b>, decime y lo adapto a tu API real.
           </div>
         </div>
       </div>
@@ -345,7 +376,9 @@ export default function AdminSuppliersPage() {
   // Orders drawer state
   // ----------------------
   const [ordersOpen, setOrdersOpen] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(
+    null
+  );
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -365,14 +398,20 @@ export default function AdminSuppliersPage() {
   >([{ ingredientId: "", qty: "" }]);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(null);
+  const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(
+    null
+  );
 
-  // receive form
-  const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
+  // receive form (drafts per ingredient)
+  const [receivePrices, setReceivePrices] = useState<Record<string, string>>(
+    {}
+  );
   const [receiveQtys, setReceiveQtys] = useState<Record<string, string>>({});
 
   // invoice url per order (controlled locally)
-  const [invoiceUrlByOrder, setInvoiceUrlByOrder] = useState<Record<string, string>>({});
+  const [invoiceUrlByOrder, setInvoiceUrlByOrder] = useState<
+    Record<string, string>
+  >({});
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -396,7 +435,10 @@ export default function AdminSuppliersPage() {
     setOk(null);
     setLoading(true);
     try {
-      const data = await apiFetchAuthed<Supplier[]>(getAccessToken, "/suppliers");
+      const data = await apiFetchAuthed<Supplier[]>(
+        getAccessToken,
+        "/suppliers"
+      );
       setItems(data);
       flashOk("Datos actualizados ✔");
     } catch (e: any) {
@@ -509,7 +551,9 @@ export default function AdminSuppliersPage() {
   }
 
   function removeLine(i: number) {
-    setPoLines((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+    setPoLines((prev) =>
+      prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)
+    );
   }
 
   function setLine(
@@ -523,7 +567,9 @@ export default function AdminSuppliersPage() {
       qty: string;
     }>
   ) {
-    setPoLines((prev) => prev.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+    setPoLines((prev) =>
+      prev.map((x, idx) => (idx === i ? { ...x, ...patch } : x))
+    );
   }
 
   function openPickerForLine(i: number) {
@@ -578,7 +624,6 @@ export default function AdminSuppliersPage() {
       flashOk("Pedido creado ✔");
       await loadOrders(selectedSupplier.id);
 
-      // reset form
       setPoNotes("");
       setPoLines([{ ingredientId: "", qty: "" }]);
     } catch (e: any) {
@@ -592,10 +637,14 @@ export default function AdminSuppliersPage() {
     setOrdersBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(getAccessToken, `/purchase-orders/${orderId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
+      await apiFetchAuthed(
+        getAccessToken,
+        `/purchase-orders/${orderId}/status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status }),
+        }
+      );
       flashOk("Estado actualizado ✔");
       if (selectedSupplier) await loadOrders(selectedSupplier.id);
     } catch (e: any) {
@@ -606,34 +655,53 @@ export default function AdminSuppliersPage() {
   }
 
   async function receiveOrder(order: PurchaseOrder) {
-    const itemsPayload = (order.items || [])
+    const payloadItems = (order.items || [])
       .map((it) => {
         const qtyStr = receiveQtys[it.ingredientId];
         const priceStr = receivePrices[it.ingredientId];
 
-        const payload: any = { ingredientId: it.ingredientId };
+        const p: any = { ingredientId: it.ingredientId };
 
-        if (qtyStr != null && qtyStr.trim() !== "") payload.receivedQty = Number(qtyStr);
-        if (priceStr != null && priceStr.trim() !== "") payload.realUnitPrice = Number(priceStr);
+        if (qtyStr != null && qtyStr.trim() !== "") {
+          const n = Number(qtyStr);
+          if (!Number.isFinite(n) || n < 0) return null;
+          p.receivedQty = n;
+        }
 
-        const has = payload.receivedQty != null || payload.realUnitPrice != null;
-        return has ? payload : null;
+        if (priceStr != null && priceStr.trim() !== "") {
+          const n = Number(priceStr);
+          if (!Number.isFinite(n) || n < 0) return null;
+          p.realUnitPrice = n;
+        }
+
+        const has = p.receivedQty != null || p.realUnitPrice != null;
+        return has ? p : null;
       })
       .filter(Boolean);
 
-    if (!itemsPayload.length) {
-      setErr("Cargá al menos una cantidad recibida o un precio real");
+    if (!payloadItems.length) {
+      setErr(
+        "Cargá al menos una cantidad recibida o un precio real (en algún ítem)."
+      );
       return;
     }
 
     setOrdersBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(getAccessToken, `/purchase-orders/${order.id}/receive`, {
-        method: "PATCH",
-        body: JSON.stringify({ items: itemsPayload }),
-      });
+      await apiFetchAuthed(
+        getAccessToken,
+        `/purchase-orders/${order.id}/receive`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ items: payloadItems }),
+        }
+      );
+
       flashOk("Recepción aplicada ✔ (stock actualizado)");
+      setReceivePrices({});
+      setReceiveQtys({});
+
       if (selectedSupplier) await loadOrders(selectedSupplier.id);
     } catch (e: any) {
       setErr(e?.message || "Error aplicando recepción");
@@ -652,10 +720,14 @@ export default function AdminSuppliersPage() {
     setOrdersBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(getAccessToken, `/purchase-orders/${orderId}/invoice`, {
-        method: "PATCH",
-        body: JSON.stringify({ imageUrl }),
-      });
+      await apiFetchAuthed(
+        getAccessToken,
+        `/purchase-orders/${orderId}/invoice`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ imageUrl }),
+        }
+      );
       flashOk("Factura adjuntada ✔");
       if (selectedSupplier) await loadOrders(selectedSupplier.id);
     } catch (e: any) {
@@ -867,7 +939,10 @@ export default function AdminSuppliersPage() {
         {ordersOpen && selectedSupplier && (
           <div className="fixed inset-0 z-50">
             {/* backdrop */}
-            <div className="absolute inset-0 bg-black/30" onClick={closeOrders} />
+            <div
+              className="absolute inset-0 bg-black/30"
+              onClick={closeOrders}
+            />
 
             {/* panel */}
             <div className="absolute right-0 top-0 h-full w-full max-w-3xl bg-white shadow-xl">
@@ -925,11 +1000,16 @@ export default function AdminSuppliersPage() {
                                 <Input
                                   value={
                                     l.ingredientLabel
-                                      ? `${l.ingredientLabel} (${l.ingredientId.slice(-6)})`
+                                      ? `${l.ingredientLabel} (${l.ingredientId.slice(
+                                          -6
+                                        )})`
                                       : l.ingredientId
                                   }
                                   onChange={(e) =>
-                                    setLine(i, { ingredientId: e.target.value, ingredientLabel: undefined })
+                                    setLine(i, {
+                                      ingredientId: e.target.value,
+                                      ingredientLabel: undefined,
+                                    })
                                   }
                                   placeholder="Elegí un ingrediente…"
                                 />
@@ -947,7 +1027,8 @@ export default function AdminSuppliersPage() {
                                   {typeof l.lastCost === "number" && (
                                     <>
                                       {" "}
-                                      · Últ. costo: <b>{money(l.lastCost, l.currency ?? "ARS")}</b>
+                                      · Últ. costo:{" "}
+                                      <b>{money(l.lastCost, l.currency ?? "ARS")}</b>
                                     </>
                                   )}
                                 </div>
@@ -1024,6 +1105,10 @@ export default function AdminSuppliersPage() {
                         const approx = o.totals?.approxTotal ?? 0;
                         const real = o.totals?.realTotal ?? null;
 
+                        const closed = isOrderClosed(o.status);
+                        const receivable = canReceive(o.status);
+                        const disableEdits = ordersBusy || closed || !receivable;
+
                         return (
                           <div key={o.id} className="p-5 space-y-3">
                             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1063,8 +1148,20 @@ export default function AdminSuppliersPage() {
                                 )}
 
                                 {o.notes && (
+                                  <div className="text-xs text-zinc-500">Nota: {o.notes}</div>
+                                )}
+
+                                {closed && (
                                   <div className="text-xs text-zinc-500">
-                                    Nota: {o.notes}
+                                    Este pedido está <b>cerrado</b>. No se puede editar ni volver a aplicar
+                                    recepción.
+                                  </div>
+                                )}
+
+                                {!receivable && !closed && (
+                                  <div className="text-xs text-zinc-500">
+                                    Para recibir, el pedido debe estar <b>ENVIADO</b>, <b>CONFIRMADO</b> o{" "}
+                                    <b>RECIBIDO PARCIAL</b>.
                                   </div>
                                 )}
                               </div>
@@ -1072,21 +1169,21 @@ export default function AdminSuppliersPage() {
                               <div className="flex flex-wrap gap-2">
                                 <Button
                                   variant="secondary"
-                                  disabled={ordersBusy}
+                                  disabled={ordersBusy || closed}
                                   onClick={() => setOrderStatus(o.id, "SENT")}
                                 >
                                   ENVIADO
                                 </Button>
                                 <Button
                                   variant="secondary"
-                                  disabled={ordersBusy}
+                                  disabled={ordersBusy || closed}
                                   onClick={() => setOrderStatus(o.id, "CONFIRMED")}
                                 >
                                   CONFIRMADO
                                 </Button>
                                 <Button
                                   variant="danger"
-                                  disabled={ordersBusy}
+                                  disabled={ordersBusy || closed}
                                   onClick={() => setOrderStatus(o.id, "CANCELLED")}
                                 >
                                   CANCELAR
@@ -1132,38 +1229,114 @@ export default function AdminSuppliersPage() {
                                         {it.qty} {it.unit || ""}
                                       </td>
 
+                                      {/* Recibido (draft) */}
                                       <td className="px-3 py-2">
-                                        <Input
-                                          value={
-                                            receiveQtys[it.ingredientId] ??
-                                            String(it.receivedQty ?? "")
-                                          }
-                                          onChange={(e) =>
-                                            setReceiveQtys((p) => ({
-                                              ...p,
-                                              [it.ingredientId]: e.target.value,
-                                            }))
-                                          }
-                                          placeholder="Ej: 30"
-                                          inputMode="decimal"
-                                        />
+                                        <div className="flex items-center gap-2">
+                                          <Input
+                                            value={receiveQtys[it.ingredientId] ?? ""}
+                                            onChange={(e) =>
+                                              setReceiveQtys((p) => ({
+                                                ...p,
+                                                [it.ingredientId]: e.target.value,
+                                              }))
+                                            }
+                                            placeholder={`Actual: ${it.receivedQty ?? 0} • Pedido: ${it.qty}`}
+                                            inputMode="decimal"
+                                            disabled={disableEdits}
+                                          />
+
+                                          <Button
+                                            type="button"
+                                            variant="secondary"
+                                            disabled={disableEdits}
+                                            onClick={() => {
+                                              setReceiveQtys((p) => ({
+                                                ...p,
+                                                [it.ingredientId]: String(it.qty),
+                                              }));
+                                            }}
+                                            title="Setear recibido igual a pedido"
+                                          >
+                                            Completar
+                                          </Button>
+
+                                          <Button
+                                            type="button"
+                                            variant="secondary"
+                                            disabled={disableEdits}
+                                            onClick={() => {
+                                              const base = Number(
+                                                receiveQtys[it.ingredientId] ??
+                                                  it.receivedQty ??
+                                                  0
+                                              );
+                                              const next = Number.isFinite(base)
+                                                ? base + 1
+                                                : (it.receivedQty ?? 0) + 1;
+                                              setReceiveQtys((p) => ({
+                                                ...p,
+                                                [it.ingredientId]: String(next),
+                                              }));
+                                            }}
+                                            title="Sumar 1 al recibido"
+                                          >
+                                            +1
+                                          </Button>
+                                        </div>
+
+                                        <div className="mt-1 text-[11px] text-zinc-500">
+                                          Pendiente:{" "}
+                                          <b>
+                                            {Math.max(
+                                              0,
+                                              (it.qty ?? 0) - (it.receivedQty ?? 0)
+                                            )}
+                                          </b>
+                                          {closed && (
+                                            <span className="ml-2 text-zinc-400">(cerrado)</span>
+                                          )}
+                                        </div>
                                       </td>
 
+                                      {/* Precio real (draft) */}
                                       <td className="px-3 py-2">
-                                        <Input
-                                          value={
-                                            receivePrices[it.ingredientId] ??
-                                            (it.realUnitPrice ?? "").toString()
-                                          }
-                                          onChange={(e) =>
-                                            setReceivePrices((p) => ({
-                                              ...p,
-                                              [it.ingredientId]: e.target.value,
-                                            }))
-                                          }
-                                          placeholder="Ej: 2550"
-                                          inputMode="decimal"
-                                        />
+                                        <div className="flex items-center gap-2">
+                                          <Input
+                                            value={receivePrices[it.ingredientId] ?? ""}
+                                            onChange={(e) =>
+                                              setReceivePrices((p) => ({
+                                                ...p,
+                                                [it.ingredientId]: e.target.value,
+                                              }))
+                                            }
+                                            placeholder={
+                                              it.realUnitPrice != null
+                                                ? `Actual: ${it.realUnitPrice}`
+                                                : it.approxUnitPrice != null
+                                                ? `Aprox: ${it.approxUnitPrice}`
+                                                : "Ej: 2550"
+                                            }
+                                            inputMode="decimal"
+                                            disabled={disableEdits}
+                                          />
+
+                                          <Button
+                                            type="button"
+                                            variant="secondary"
+                                            disabled={disableEdits || it.approxUnitPrice == null}
+                                            onClick={() => {
+                                              const v = it.approxUnitPrice ?? null;
+                                              if (v == null) return;
+                                              setReceivePrices((p) => ({
+                                                ...p,
+                                                [it.ingredientId]: String(v),
+                                              }));
+                                            }}
+                                            title="Copiar precio aproximado como real"
+                                          >
+                                            Copiar aprox
+                                          </Button>
+                                        </div>
                                       </td>
                                     </tr>
                                   ))}
@@ -1183,6 +1356,7 @@ export default function AdminSuppliersPage() {
                                     }))
                                   }
                                   placeholder="URL factura (Cloudinary) — pegala acá"
+                                  disabled={ordersBusy}
                                 />
                                 <Button
                                   variant="secondary"
@@ -1196,9 +1370,9 @@ export default function AdminSuppliersPage() {
                               <Button
                                 onClick={() => receiveOrder(o)}
                                 loading={ordersBusy}
-                                disabled={ordersBusy}
+                                disabled={ordersBusy || closed || !receivable}
                               >
-                                Aplicar recepción (stock)
+                                {closed ? "Recepción cerrada" : "Aplicar recepción (stock)"}
                               </Button>
                             </div>
 

@@ -198,7 +198,7 @@ export default function AdminShell({
         {
           type: "link",
           href: "/admin/stock",
-          label: "Stock (conteo diario)",
+          label: "Stock",
           roles: ["ADMIN", "MANAGER"],
           icon: <ClipboardList className="h-4 w-4" />,
         },

@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Protected } from "@/components/Protected";
+import React, { useEffect, useMemo, useState } from "react";
+import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
-import { todayKey } from "@/lib/dateKey";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
@@ -14,963 +12,1297 @@ import {
   Search,
   AlertTriangle,
   CheckCircle2,
-  Flame,
-  ArrowLeft,
-  Minus,
-  Plus,
-  XCircle,
+  Package,
+  SlidersHorizontal,
+  ShoppingCart,
+  X,
+  ScrollText,
 } from "lucide-react";
 
-type Supplier = { id: string; name: string; isActive: boolean };
-type Unit = "UNIT" | "KG" | "L";
+/* =============================================================================
+ * Endpoints reales (según tu controller)
+ * ========================================================================== */
+const API_INGREDIENTS = "/ingredients";
+const API_SUPPLIERS = "/suppliers";
 
-type Ingredient = {
-  id: string;
-  name: string;
-  baseUnit: Unit;
-  supplierId: string;
-  isActive: boolean;
-  stock: { minQty: number };
-};
+const API_STOCK_MANUAL = "/stock/manual"; // ✅ tu controller
+const API_STOCK_MOVEMENTS = "/stock/movements"; // ✅ auditoría
+const API_PURCHASE_ORDERS = "/purchase-orders"; // ✅ tu controller
 
-type Snapshot = {
-  id: string;
-  dateKey: string;
-  supplierId: string;
-  items: { ingredientId: string; qty: number }[];
-};
-
-const ALL = "__ALL__";
-
-function unitLabel(u: Ingredient["baseUnit"]) {
-  if (u === "UNIT") return "Unidad";
-  if (u === "KG") return "Kg";
-  if (u === "L") return "Litros";
-  return u;
-}
-
+/* =============================================================================
+ * Helpers
+ * ========================================================================== */
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+function todayKeyArgentina() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Cordoba",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
-function toNum(raw: string | undefined) {
-  if (raw == null || raw === "") return 0;
-  const n = Number(raw);
+function num(v: any) {
+  const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function looksForbidden(msg: string) {
-  const m = (msg || "").toLowerCase();
+function money(n: number, currency: "ARS" | "USD" = "ARS") {
+  const v = Number(n ?? 0) || 0;
+  try {
+    return v.toLocaleString("es-AR", { style: "currency", currency });
+  } catch {
+    return v.toLocaleString("es-AR");
+  }
+}
+
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "error" | "ok" | "warn";
+  children: React.ReactNode;
+}) {
+  const map = {
+    error: "border-red-200 bg-red-50 text-red-700",
+    ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    warn: "border-amber-200 bg-amber-50 text-amber-800",
+  } as const;
+
+  const Icon =
+    tone === "ok"
+      ? CheckCircle2
+      : tone === "warn"
+      ? AlertTriangle
+      : AlertTriangle;
+
   return (
-    m.includes("forbidden") ||
-    m.includes("sin permisos") ||
-    m.includes("prohibido")
+    <div className={cn("rounded-2xl border px-3 py-2 text-sm", map[tone])}>
+      <span className="inline-flex items-center gap-2">
+        <Icon className="h-4 w-4" />
+        {children}
+      </span>
+    </div>
   );
 }
 
-type CacheEntry = {
-  ingredients: Ingredient[];
-  qtyMap: Record<string, string>;
-  initialHash: string;
+/* =============================================================================
+ * Types
+ * ========================================================================== */
+type Supplier = { id: string; name: string; isActive: boolean };
+
+type IngredientRow = {
+  id: string;
+  name: string;
+  displayName?: string | null;
+  baseUnit?: string | null;
+  supplierId?: string | null;
+  name_for_supplier?: string | null;
+  isActive?: boolean;
+
+  stock?: {
+    trackStock?: boolean;
+    onHand?: number;
+    reserved?: number;
+    minQty?: number;
+    idealQty?: number | null;
+    storageLocation?: string | null;
+  };
+
+  cost?: {
+    lastCost?: number;
+    avgCost?: number;
+    currency?: "ARS" | "USD";
+  };
 };
 
-export default function StockPage() {
-  const router = useRouter();
-  const { getAccessToken } = useAuth();
+type ManualMode = "IN" | "OUT" | "ADJUST";
 
-  // Form
-  const [dateKey, setDateKey] = useState(todayKey());
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierId, setSupplierId] = useState<string>(ALL);
+/** OJO: names deben coincidir con tus enums en backend */
+type StockMovementType = "IN" | "OUT" | "ADJUST"; // si tu enum es otro, cambiá acá
+type StockMovementReason = "MANUAL" | "PURCHASE" | "WASTE" | "ADJUSTMENT"; // idem
 
-  // Visible data
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [qtyByIngredientId, setQtyByIngredientId] = useState<
-    Record<string, string>
-  >({});
+type StockMovementRow = {
+  id: string;
+  dateKey: string;
+  ingredientId: string;
+  qty: number;
+  qtyAfter?: number;
+  unit?: string;
+  type?: string;
+  reason?: string;
+  note?: string | null;
+  createdAt?: string;
+};
 
-  // States
-  const [loadingSuppliers, setLoadingSuppliers] = useState(true);
-  const [loadingData, setLoadingData] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [busyRefresh, setBusyRefresh] = useState(false);
+type POCreatePayload = {
+  supplierId: string;
+  notes?: string | null;
+  items: Array<{ ingredientId: string; qty: number }>;
+};
 
+function prettyName(i: IngredientRow) {
+  return String(i.displayName || i.name || "").trim() || "—";
+}
+
+function StockPill({ onHand, minQty }: { onHand: number; minQty: number }) {
+  const low = minQty > 0 && onHand < minQty;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border",
+        low
+          ? "bg-red-50 text-red-700 border-red-200"
+          : "bg-emerald-50 text-emerald-700 border-emerald-200"
+      )}
+    >
+      {low ? "BAJO" : "OK"}
+    </span>
+  );
+}
+
+/* =============================================================================
+ * Movements Modal (auditoría)
+ * ========================================================================== */
+function MovementsModal({
+  open,
+  onClose,
+  ingredient,
+  getAccessToken,
+}: {
+  open: boolean;
+  onClose: () => void;
+  ingredient: IngredientRow | null;
+  getAccessToken: any;
+}) {
+  const [rows, setRows] = useState<StockMovementRow[]>([]);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  // UX
-  const [query, setQuery] = useState("");
-  const [showOnlyBelowMin, setShowOnlyBelowMin] = useState(false);
-  const [showOnlyMissing, setShowOnlyMissing] = useState(false);
-  const [compact, setCompact] = useState(false);
-
-  // Dirty tracking (vista actual)
-  const initialHashRef = useRef("");
-  const hasLoadedOnceRef = useRef(false);
-
-  // Cache por fecha+proveedor (para no perder datos al cambiar)
-  const cacheRef = useRef<Record<string, CacheEntry>>({});
-  const cacheKey = (sid: string) => `${dateKey}|${sid}`;
-
-  // Prevent setState after unmount
-  const aliveRef = useRef(true);
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-    };
-  }, []);
-
-  const activeSuppliers = useMemo(
-    () => suppliers.filter((s) => s.isActive !== false),
-    [suppliers]
-  );
-
-  const activeIngredients = useMemo(
-    () => ingredients.filter((p) => p.isActive !== false),
-    [ingredients]
-  );
-
-  // =======================
-  // Cache helpers (CRÍTICO)
-  // =======================
-
-  function upsertCacheForSupplier(
-    sid: string,
-    update: (prev: CacheEntry) => CacheEntry
-  ) {
-    const key = cacheKey(sid);
-    const prev = cacheRef.current[key];
-
-    if (prev) {
-      cacheRef.current[key] = update(prev);
-      return;
-    }
-
-    // inicializa cache si todavía no existe (fallback)
-    const ings = ingredients.filter((i) => i.supplierId === sid);
-    const map: Record<string, string> = {};
-    for (const ing of ings) map[ing.id] = qtyByIngredientId[ing.id] ?? "";
-
-    cacheRef.current[key] = update({
-      ingredients: ings,
-      qtyMap: map,
-      initialHash: JSON.stringify(map),
-    });
-  }
-
-  function setCachedQty(ingredientId: string, value: string) {
-    const ing = ingredients.find((x) => x.id === ingredientId);
-    if (!ing) return;
-
-    const sid = ing.supplierId;
-
-    upsertCacheForSupplier(sid, (prev) => ({
-      ...prev,
-      ingredients:
-        prev.ingredients?.length > 0
-          ? prev.ingredients
-          : ingredients.filter((i) => i.supplierId === sid),
-      qtyMap: { ...prev.qtyMap, [ingredientId]: value },
-    }));
-  }
-
-  function setCachedQtyMany(
-    pairs: Array<{ ingredientId: string; value: string }>
-  ) {
-    // agrupa por proveedor (evita N updates separados)
-    const bySupplier: Record<
-      string,
-      Array<{ ingredientId: string; value: string }>
-    > = {};
-
-    for (const it of pairs) {
-      const ing = ingredients.find((x) => x.id === it.ingredientId);
-      if (!ing) continue;
-      const sid = ing.supplierId;
-      (bySupplier[sid] ||= []).push(it);
-    }
-
-    for (const sid of Object.keys(bySupplier)) {
-      const list = bySupplier[sid];
-      upsertCacheForSupplier(sid, (prev) => {
-        const nextMap = { ...prev.qtyMap };
-        for (const it of list) nextMap[it.ingredientId] = it.value;
-
-        return {
-          ...prev,
-          ingredients:
-            prev.ingredients?.length > 0
-              ? prev.ingredients
-              : ingredients.filter((i) => i.supplierId === sid),
-          qtyMap: nextMap,
-        };
-      });
-    }
-  }
-
-  // ================
-  // Stats + Filtros
-  // ================
-
-  const stats = useMemo(() => {
-    const belowMin = activeIngredients.filter((p) => {
-      const n = toNum(qtyByIngredientId[p.id]);
-      const min = p.stock?.minQty ?? 0;
-      return min > 0 && n < min;
-    }).length;
-
-    const missing = activeIngredients.filter(
-      (p) => (qtyByIngredientId[p.id] ?? "") === ""
-    ).length;
-
-    return {
-      total: activeIngredients.length,
-      belowMin,
-      missing,
-      ok: activeIngredients.length > 0 && belowMin === 0 && missing === 0,
-    };
-  }, [activeIngredients, qtyByIngredientId]);
-
-  const filteredIngredients = useMemo(() => {
-    const q = query.trim().toLowerCase();
-
-    return (
-      activeIngredients
-        .filter((p) => {
-          const raw = qtyByIngredientId[p.id] ?? "";
-          const n = raw === "" ? 0 : Number(raw);
-          const min = p.stock?.minQty ?? 0;
-
-          const isBelowMin = min > 0 && Number.isFinite(n) && n < min;
-          const isMissing = raw === "";
-
-          if (showOnlyBelowMin && !isBelowMin) return false;
-          if (showOnlyMissing && !isMissing) return false;
-
-          if (!q) return true;
-
-          return (
-            p.name.toLowerCase().includes(q) ||
-            unitLabel(p.baseUnit).toLowerCase().includes(q)
-          );
-        })
-        // UX: primero faltantes, luego bajo mínimo, luego alfabético
-        .sort((a, b) => a.name.localeCompare(b.name))
-    );
-  }, [
-    activeIngredients,
-    qtyByIngredientId,
-    query,
-    showOnlyBelowMin,
-    showOnlyMissing,
-  ]);
-
-  // ---------------- Data ----------------
-
-  async function loadSuppliers() {
+  async function load() {
+    if (!ingredient) return;
+    setLoading(true);
     setErr(null);
-    setOkMsg(null);
-    setLoadingSuppliers(true);
-
     try {
-      // Espera a que exista token (evita el primer render sin auth)
-      let token = await getAccessToken();
-      if (!token) {
-        await new Promise((r) => setTimeout(r, 150));
-        token = await getAccessToken();
-      }
-      if (!token) throw new Error("No autenticado (token no disponible).");
-
-      const s = await apiFetchAuthed<Supplier[]>(
-        async () => token!,
-        "/suppliers"
+      const data = await apiFetchAuthed<StockMovementRow[]>(
+        getAccessToken,
+        `${API_STOCK_MOVEMENTS}?ingredientId=${encodeURIComponent(
+          ingredient.id
+        )}&limit=50`
       );
-
-      if (!aliveRef.current) return;
-      setSuppliers(s);
+      setRows(Array.isArray(data) ? data : []);
     } catch (e: any) {
-      const msg = String(e?.message || "Error cargando proveedores");
-      if (looksForbidden(msg)) {
-        setErr(
-          "Sin permisos para ver proveedores (tu rol no está habilitado para Stock)."
-        );
-      } else {
-        setErr(msg);
-      }
+      setErr(e?.message || "Error cargando movimientos");
     } finally {
-      if (aliveRef.current) setLoadingSuppliers(false);
-    }
-  }
-
-  async function fetchAndCacheSupplier(sid: string): Promise<CacheEntry> {
-    const key = cacheKey(sid);
-    const cached = cacheRef.current[key];
-    if (cached) return cached;
-
-    const ings = await apiFetchAuthed<Ingredient[]>(
-      getAccessToken,
-      `/ingredients?supplierId=${encodeURIComponent(sid)}`
-    );
-
-    const snap = await apiFetchAuthed<Snapshot | null>(
-      getAccessToken,
-      `/stock-snapshots?dateKey=${encodeURIComponent(
-        dateKey
-      )}&supplierId=${encodeURIComponent(sid)}`
-    );
-
-    const map: Record<string, string> = {};
-    for (const p of ings) map[p.id] = "";
-
-    if (snap?.items?.length) {
-      for (const it of snap.items) {
-        map[it.ingredientId] = String(it.qty ?? "");
-      }
-    }
-
-    const entry: CacheEntry = {
-      ingredients: ings,
-      qtyMap: map,
-      initialHash: JSON.stringify(map),
-    };
-
-    cacheRef.current[key] = entry;
-    return entry;
-  }
-
-  async function loadSupplierData(nextSupplierId?: string) {
-    const sid = nextSupplierId ?? supplierId;
-    if (!sid || sid === ALL) return;
-
-    setErr(null);
-    setOkMsg(null);
-    setLoadingData(true);
-
-    try {
-      // ✅ usar cache si ya existe (no pisar)
-      const key = cacheKey(sid);
-      const cached = cacheRef.current[key];
-      if (cached) {
-        if (!aliveRef.current) return;
-        setIngredients(cached.ingredients);
-        setQtyByIngredientId(cached.qtyMap);
-        initialHashRef.current = cached.initialHash;
-        hasLoadedOnceRef.current = true;
-        return;
-      }
-
-      const entry = await fetchAndCacheSupplier(sid);
-      if (!aliveRef.current) return;
-
-      setIngredients(entry.ingredients);
-      setQtyByIngredientId(entry.qtyMap);
-
-      initialHashRef.current = entry.initialHash;
-      hasLoadedOnceRef.current = true;
-    } catch (e: any) {
-      const msg = String(e?.message || "Error cargando stock");
-      if (looksForbidden(msg)) {
-        setErr("Sin permisos para ver stock / snapshots.");
-      } else {
-        setErr(msg);
-      }
-    } finally {
-      if (aliveRef.current) setLoadingData(false);
-    }
-  }
-
-  async function loadAllData() {
-    setErr(null);
-    setOkMsg(null);
-    setLoadingData(true);
-
-    try {
-      const actives = activeSuppliers;
-      if (!actives.length) {
-        setIngredients([]);
-        setQtyByIngredientId({});
-        return;
-      }
-
-      const entries = await Promise.all(
-        actives.map((s) => fetchAndCacheSupplier(s.id))
-      );
-      if (!aliveRef.current) return;
-
-      const allIngredients = entries.flatMap((e) => e.ingredients);
-
-      const allQtyMap: Record<string, string> = {};
-      for (const e of entries) Object.assign(allQtyMap, e.qtyMap);
-
-      setIngredients(allIngredients);
-      setQtyByIngredientId(allQtyMap);
-
-      initialHashRef.current = JSON.stringify(allQtyMap);
-      hasLoadedOnceRef.current = true;
-    } catch (e: any) {
-      const msg = String(e?.message || "Error cargando stock");
-      if (looksForbidden(msg)) {
-        setErr("Sin permisos para ver stock / snapshots.");
-      } else {
-        setErr(msg);
-      }
-    } finally {
-      if (aliveRef.current) setLoadingData(false);
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadSuppliers();
+    if (!open) return;
+    setRows([]);
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [open, ingredient?.id]);
 
-  // ✅ Si cambia el día, limpiamos cache (son otros snapshots)
-  useEffect(() => {
-    cacheRef.current = {};
-    hasLoadedOnceRef.current = false;
-    initialHashRef.current = "";
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateKey]);
-
-  useEffect(() => {
-    if (loadingSuppliers) return;
-    if (supplierId === ALL) loadAllData();
-    else loadSupplierData(supplierId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId, dateKey, loadingSuppliers]);
-
-  const isDirty = useMemo(() => {
-    if (!hasLoadedOnceRef.current) return false;
-    return JSON.stringify(qtyByIngredientId) !== initialHashRef.current;
-  }, [qtyByIngredientId]);
-
-  const isLoading = loadingSuppliers || loadingData;
-
-  // ---------------- Actions ----------------
-
-  function setQty(ingredientId: string, v: string) {
-    // acepta "" o números con punto
-    if (v === "" || /^[0-9]*([.][0-9]*)?$/.test(v)) {
-      setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: v }));
-      setCachedQty(ingredientId, v); // ✅ no perder al filtrar/cambiar
-    }
-  }
-
-  function stepQty(ingredientId: string, step: number) {
-    const raw = qtyByIngredientId[ingredientId] ?? "";
-    const current = raw === "" ? 0 : Number(raw);
-    const next = clamp(
-      (Number.isFinite(current) ? current : 0) + step,
-      0,
-      999999
-    );
-    const nextStr = String(next);
-
-    setQtyByIngredientId((prev) => ({ ...prev, [ingredientId]: nextStr }));
-    setCachedQty(ingredientId, nextStr); // ✅
-  }
-
-  function clearAll() {
-    if (!window.confirm("¿Vaciar todos los valores cargados (vista actual)?"))
-      return;
-
-    const pairs: Array<{ ingredientId: string; value: string }> = [];
-    for (const p of ingredients) pairs.push({ ingredientId: p.id, value: "" });
-
-    setQtyByIngredientId((prev) => {
-      const next = { ...prev };
-      for (const it of pairs) next[it.ingredientId] = "";
-      return next;
-    });
-
-    setCachedQtyMany(pairs); // ✅ actualiza cache por proveedor
-  }
-
-  async function save() {
-    setErr(null);
-    setOkMsg(null);
-    setSaving(true);
-
-    try {
-      const putSnapshot = async (
-        sid: string,
-        ings: Ingredient[],
-        qtyMap: Record<string, string>
-      ) => {
-        const items = ings
-          .filter((p) => p.isActive !== false)
-          .map((p) => ({
-            ingredientId: p.id,
-            qty: toNum(qtyMap[p.id]),
-          }));
-
-        await apiFetchAuthed(getAccessToken, "/stock-snapshots", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dateKey, supplierId: sid, items }),
-        });
-
-        // update initialHash del proveedor (guardado)
-        const key = cacheKey(sid);
-        const current = cacheRef.current[key];
-        if (current) {
-          cacheRef.current[key] = {
-            ...current,
-            initialHash: JSON.stringify(current.qtyMap),
-          };
-        }
-      };
-
-      if (supplierId === ALL) {
-        const actives = activeSuppliers;
-
-        await Promise.all(
-          actives.map(async (s) => {
-            const entry = await fetchAndCacheSupplier(s.id);
-
-            // sincroniza mapa del proveedor con lo que está en pantalla
-            const mergedMap = { ...entry.qtyMap };
-            for (const ing of entry.ingredients) {
-              mergedMap[ing.id] = qtyByIngredientId[ing.id] ?? "";
-            }
-
-            await putSnapshot(s.id, entry.ingredients, mergedMap);
-
-            // persistimos mergedMap en cache
-            cacheRef.current[cacheKey(s.id)] = {
-              ingredients: entry.ingredients,
-              qtyMap: mergedMap,
-              initialHash: JSON.stringify(mergedMap),
-            };
-          })
-        );
-
-        if (!aliveRef.current) return;
-        setOkMsg("Guardado de TODOS los proveedores ✔");
-        initialHashRef.current = JSON.stringify(qtyByIngredientId);
-      } else {
-        const sid = supplierId;
-
-        const entry = await fetchAndCacheSupplier(sid);
-        const mergedMap = { ...entry.qtyMap };
-        for (const ing of entry.ingredients) {
-          mergedMap[ing.id] = qtyByIngredientId[ing.id] ?? "";
-        }
-
-        await putSnapshot(sid, entry.ingredients, mergedMap);
-
-        cacheRef.current[cacheKey(sid)] = {
-          ingredients: entry.ingredients,
-          qtyMap: mergedMap,
-          initialHash: JSON.stringify(mergedMap),
-        };
-
-        if (!aliveRef.current) return;
-        setOkMsg("Guardado ✔");
-        initialHashRef.current = JSON.stringify(qtyByIngredientId);
-      }
-    } catch (e: any) {
-      const msg = String(e?.message || "Error guardando");
-      if (looksForbidden(msg)) {
-        setErr("Sin permisos para guardar snapshots.");
-      } else {
-        setErr(msg);
-      }
-    } finally {
-      if (aliveRef.current) setSaving(false);
-    }
-  }
-
-  async function refresh() {
-    setBusyRefresh(true);
-    try {
-      // Forzar re-fetch (limpia cache de la vista actual)
-      if (supplierId === ALL) {
-        cacheRef.current = {};
-        await loadAllData();
-      } else {
-        delete cacheRef.current[cacheKey(supplierId)];
-        await loadSupplierData(supplierId);
-      }
-    } finally {
-      if (aliveRef.current) setBusyRefresh(false);
-    }
-  }
-
-  // ---------------- UI ----------------
-
-  const statusPill = isLoading ? (
-    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
-      Cargando…
-    </span>
-  ) : stats.ok ? (
-    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-      <CheckCircle2 className="h-4 w-4" />
-      Todo OK
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
-      <AlertTriangle className="h-4 w-4" />
-      Atención
-    </span>
-  );
+  if (!open || !ingredient) return null;
 
   return (
-    <Protected>
-      <div className="space-y-6">
-        {/* Sticky header */}
-        <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur">
-          <div className="px-4 py-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-2xl font-bold text-zinc-900">
-                    Conteo diario de stock
-                  </h1>
-                  {statusPill}
-                  {isDirty && !isLoading && (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                      Cambios sin guardar
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
-                  <span>Snapshot diario por proveedor (histórico).</span>
-                  {!isLoading && (
-                    <span className="text-zinc-600">
-                      Total: <b>{stats.total}</b> · Bajo mínimo:{" "}
-                      <b className={stats.belowMin ? "text-amber-700" : ""}>
-                        {stats.belowMin}
-                      </b>{" "}
-                      · Sin cargar:{" "}
-                      <b className={stats.missing ? "text-amber-700" : ""}>
-                        {stats.missing}
-                      </b>
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="secondary" onClick={() => router.back()}>
-                  <ArrowLeft className="h-4 w-4" />
-                  Volver
-                </Button>
-
-                <Button
-                  variant="secondary"
-                  onClick={refresh}
-                  loading={busyRefresh}
-                  disabled={busyRefresh || saving}
-                >
-                  <RefreshCcw className="h-4 w-4" />
-                  Actualizar
-                </Button>
-
-                <Button
-                  variant="secondary"
-                  onClick={clearAll}
-                  disabled={saving || isLoading || ingredients.length === 0}
-                >
-                  <XCircle className="h-4 w-4" />
-                  Vaciar
-                </Button>
-
-                <Button
-                  onClick={save}
-                  loading={saving}
-                  disabled={saving || isLoading}
-                >
-                  Guardar
-                </Button>
-              </div>
+    <div className="fixed inset-0 z-[75]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute left-1/2 top-10 w-[min(980px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <div className="text-xs text-zinc-500">Movimientos de stock</div>
+            <div className="text-lg font-semibold text-zinc-900">
+              {prettyName(ingredient)}{" "}
+              <span className="text-sm font-normal text-zinc-500">
+                ({ingredient.id.slice(-6)})
+              </span>
             </div>
-
-            {err && (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {err}
-              </div>
-            )}
-            {okMsg && (
-              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                {okMsg}
-              </div>
-            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={load} disabled={loading}>
+              <span className="inline-flex items-center gap-2">
+                <RefreshCcw className="h-4 w-4" />
+                Actualizar
+              </span>
+            </Button>
+            <Button variant="secondary" onClick={onClose}>
+              Cerrar
+            </Button>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="space-y-6">
-          {/* Filtros */}
+        <div className="p-5">
+          {err && <Notice tone="error">{err}</Notice>}
+
+          <div className="mt-3 overflow-hidden rounded-2xl border border-zinc-200">
+            <table className="min-w-full">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                    Fecha
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                    Tipo / Razón
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                    Qty
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                    Stock después
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                    Nota
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {loading && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
+                      Cargando…
+                    </td>
+                  </tr>
+                )}
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-sm text-zinc-500">
+                      Sin movimientos.
+                    </td>
+                  </tr>
+                )}
+                {!loading &&
+                  rows.map((r) => (
+                    <tr key={r.id}>
+                      <td className="px-4 py-2 text-sm text-zinc-700">
+                        <div className="font-semibold">{r.dateKey}</div>
+                        {r.createdAt && (
+                          <div className="text-xs text-zinc-500">
+                            {new Date(r.createdAt).toLocaleString("es-AR")}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-zinc-700">
+                        <div className="font-semibold">
+                          {r.type || "—"} / {r.reason || "—"}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          {r.unit || "—"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 text-sm">
+                        <span
+                          className={cn(
+                            "font-semibold",
+                            r.qty < 0 ? "text-red-700" : "text-emerald-700"
+                          )}
+                        >
+                          {r.qty}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-sm text-zinc-700">
+                        {r.qtyAfter ?? "—"}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-zinc-700">
+                        {r.note ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3 text-xs text-zinc-500">
+            Endpoint: GET /stock/movements?ingredientId=...&limit=50
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+ * Movement Modal (manual => /stock/manual)
+ * ========================================================================== */
+function ManualMoveModal({
+  open,
+  onClose,
+  ingredient,
+  suppliersById,
+  getAccessToken,
+  onApplied,
+}: {
+  open: boolean;
+  onClose: () => void;
+  ingredient: IngredientRow | null;
+  suppliersById: Record<string, Supplier>;
+  getAccessToken: any;
+  onApplied: () => void;
+}) {
+  const [mode, setMode] = useState<ManualMode>("IN");
+  const [reason, setReason] = useState<StockMovementReason>("MANUAL");
+  const [qty, setQty] = useState<string>("");
+  const [note, setNote] = useState<string>("");
+  const [dateKey, setDateKey] = useState<string>(todayKeyArgentina());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setMode("IN");
+    setReason("MANUAL");
+    setQty("");
+    setNote("");
+    setDateKey(todayKeyArgentina());
+    setErr(null);
+  }, [open]);
+
+  if (!open || !ingredient) return null;
+
+  const supplierName =
+    ingredient.supplierId && suppliersById[ingredient.supplierId]
+      ? suppliersById[ingredient.supplierId].name
+      : "—";
+
+  const onHand = num(ingredient.stock?.onHand);
+  const minQty = num(ingredient.stock?.minQty);
+
+  function mapType(m: ManualMode): StockMovementType {
+    if (m === "IN") return "IN";
+    if (m === "OUT") return "OUT";
+    return "ADJUST";
+  }
+
+  async function apply() {
+    setErr(null);
+
+    const q = Number(qty);
+    if (!Number.isFinite(q) || q === 0) {
+      setErr("Ingresá una cantidad distinta de 0");
+      return;
+    }
+
+    let qtyDelta = q;
+    if (mode === "IN") qtyDelta = Math.abs(q);
+    if (mode === "OUT") qtyDelta = -Math.abs(q);
+    if (mode === "ADJUST") qtyDelta = q;
+
+    setBusy(true);
+    try {
+      await apiFetchAuthed(getAccessToken, API_STOCK_MANUAL, {
+        method: "POST",
+        body: JSON.stringify({
+          dateKey,
+          type: mapType(mode),
+          reason,
+          refType: "MANUAL_UI",
+          refId: null,
+          items: [
+            {
+              ingredientId: ingredient?.id,
+              unit: ingredient?.baseUnit ?? "UNIT",
+              qtyDelta,
+            },
+          ],
+          note: note.trim() || null,
+        }),
+      });
+
+      onApplied();
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || "Error aplicando movimiento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute left-1/2 top-10 w-[min(900px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+          <div className="space-y-1">
+            <div className="text-xs text-zinc-500">Movimiento manual</div>
+            <div className="text-lg font-semibold text-zinc-900">
+              {prettyName(ingredient)}{" "}
+              <span className="text-sm font-normal text-zinc-500">
+                ({ingredient.id.slice(-6)})
+              </span>
+            </div>
+            <div className="text-sm text-zinc-600">
+              Proveedor: <b>{supplierName}</b> · Unidad:{" "}
+              <b>{ingredient.baseUnit || "—"}</b>
+            </div>
+            <div className="text-sm text-zinc-700">
+              Stock actual: <b>{onHand}</b> · Min: <b>{minQty}</b>
+            </div>
+          </div>
+
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            <span className="inline-flex items-center gap-2">
+              <X className="h-4 w-4" />
+              Cerrar
+            </span>
+          </Button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {err && <Notice tone="error">{err}</Notice>}
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Tipo">
+              <Select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as any)}
+              >
+                <option value="IN">Entrada (IN)</option>
+                <option value="OUT">Salida (OUT)</option>
+                <option value="ADJUST">Ajuste (+/-)</option>
+              </Select>
+            </Field>
+
+            <Field label="Razón">
+              <Select
+                value={reason}
+                onChange={(e) => setReason(e.target.value as any)}
+              >
+                <option value="MANUAL">MANUAL</option>
+                <option value="PURCHASE">PURCHASE</option>
+                <option value="WASTE">WASTE</option>
+                <option value="ADJUSTMENT">ADJUSTMENT</option>
+              </Select>
+            </Field>
+
+            <Field label="Fecha (dateKey)">
+              <Input
+                value={dateKey}
+                onChange={(e) => setDateKey(e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+            </Field>
+
+            <Field
+              label={`Cantidad (${
+                mode === "ADJUST" ? "+/-" : "valor absoluto"
+              })`}
+            >
+              <Input
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                inputMode="decimal"
+                placeholder={mode === "ADJUST" ? "Ej: -2 o 5" : "Ej: 10"}
+              />
+            </Field>
+          </div>
+
+          <Field label="Nota (opcional)">
+            <Input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Ej: merma / ajuste inventario / etc."
+            />
+          </Field>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button onClick={apply} loading={busy} disabled={busy}>
+              Aplicar
+            </Button>
+          </div>
+
+          <div className="text-xs text-zinc-500">
+            POST /stock/manual con items[{`{ingredientId, unit, qtyDelta}`}]
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+ * Create PO drawer
+ * ========================================================================== */
+function PurchaseOrderDrawer({
+  open,
+  onClose,
+  supplierId,
+  supplierName,
+  lines,
+  getAccessToken,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  supplierId: string | null;
+  supplierName: string;
+  lines: Array<{ ingredientId: string; label: string; qty: number }>;
+  getAccessToken: any;
+  onCreated: () => void;
+}) {
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // ✅ ahora las líneas se editan localmente
+  const [draftLines, setDraftLines] = useState(lines);
+
+  useEffect(() => {
+    if (!open) return;
+    setNotes("");
+    setErr(null);
+    setDraftLines(lines);
+  }, [open, lines]);
+
+  function setLineQty(ingredientId: string, next: number) {
+    const v = Number(next);
+    const safe = Number.isFinite(v) ? v : 0;
+    setDraftLines((prev) =>
+      prev.map((l) =>
+        l.ingredientId === ingredientId ? { ...l, qty: Math.max(0, safe) } : l
+      )
+    );
+  }
+
+  function removeLine(ingredientId: string) {
+    setDraftLines((prev) =>
+      prev.filter((l) => l.ingredientId !== ingredientId)
+    );
+  }
+
+  async function createPO() {
+    setErr(null);
+
+    if (!supplierId) {
+      setErr("No hay proveedor.");
+      return;
+    }
+
+    const items = draftLines
+      .map((l) => ({ ingredientId: l.ingredientId, qty: num(l.qty) }))
+      .filter((x) => x.ingredientId && x.qty > 0);
+
+    if (!items.length) {
+      setErr("No hay ítems con cantidad > 0.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const payload: POCreatePayload = {
+        supplierId,
+        notes: notes.trim() || null,
+        items,
+      };
+
+      await apiFetchAuthed(getAccessToken, API_PURCHASE_ORDERS, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      onCreated();
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || "Error creando pedido");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[70]">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <div className="text-xs text-zinc-500">Crear pedido</div>
+            <div className="text-lg font-semibold text-zinc-900">
+              {supplierName}
+            </div>
+          </div>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cerrar
+          </Button>
+        </div>
+
+        <div className="h-[calc(100%-64px)] overflow-y-auto p-5 space-y-4">
+          {err && <Notice tone="error">{err}</Notice>}
+
           <Card>
-            <CardHeader title="Filtros" subtitle="Fecha y proveedor" />
+            <CardHeader title="Notas" subtitle="Opcional" />
             <CardBody>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Fecha">
-                  <Input
-                    type="date"
-                    value={dateKey}
-                    onChange={(e) => setDateKey(e.target.value)}
-                    disabled={saving}
-                  />
-                </Field>
-
-                <Field label="Proveedor">
-                  <Select
-                    value={supplierId}
-                    onChange={(e) => setSupplierId(e.target.value)}
-                    disabled={loadingSuppliers || saving}
-                  >
-                    <option value={ALL}>Todos</option>
-                    {activeSuppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <Field label="Buscar ingrediente">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder="Nombre, unidad…"
-                      className="pl-9"
-                      disabled={isLoading}
-                    />
-                  </div>
-                </Field>
-
-                <div className="flex items-end gap-2">
-                  <Button
-                    variant={showOnlyBelowMin ? "secondary" : "ghost"}
-                    onClick={() => setShowOnlyBelowMin((v) => !v)}
-                    disabled={isLoading}
-                  >
-                    <Flame className="h-4 w-4" />
-                    Bajo mínimo
-                  </Button>
-
-                  <Button
-                    variant={showOnlyMissing ? "secondary" : "ghost"}
-                    onClick={() => setShowOnlyMissing((v) => !v)}
-                    disabled={isLoading}
-                  >
-                    Sin cargar
-                  </Button>
-                </div>
-
-                <div className="flex items-end justify-end">
-                  <Button
-                    variant={compact ? "secondary" : "ghost"}
-                    onClick={() => setCompact((v) => !v)}
-                    disabled={isLoading}
-                  >
-                    {compact ? "Compacto ON" : "Compacto"}
-                  </Button>
-                </div>
-              </div>
+              <Input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Ej: entrega mañana / segunda marca / etc."
+              />
             </CardBody>
           </Card>
 
-          {/* Tabla */}
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <div className="border-b border-zinc-100 px-5 py-4">
-              <h2 className="text-lg font-semibold text-zinc-900">
-                Ingredientes
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Tip: podés usar <b>+</b>/<b>-</b> para ajustar rápido. Si el
-                stock está bajo mínimo se marca en ámbar.
-              </p>
+          <div className="rounded-2xl border border-zinc-200 overflow-hidden">
+            <div className="border-b px-4 py-3 text-sm font-semibold text-zinc-900 flex items-center justify-between">
+              <span>Ítems ({draftLines.length})</span>
+              <span className="text-xs font-normal text-zinc-500">
+                Editá cantidades antes de crear
+              </span>
             </div>
 
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead className="bg-zinc-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
                       Ingrediente
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Unidad
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Mínimo
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
                       Cantidad
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Acciones
-                    </th>
+                    <th className="px-4 py-2" />
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-zinc-100">
-                  {isLoading && (
+                <tbody className="divide-y">
+                  {draftLines.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={3}
                         className="px-4 py-8 text-sm text-zinc-500"
                       >
-                        Cargando ingredientes…
+                        No hay ítems.
                       </td>
                     </tr>
                   )}
 
-                  {!isLoading && filteredIngredients.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-4 py-10 text-sm text-zinc-500"
-                      >
-                        No hay ingredientes para mostrar.
+                  {draftLines.map((l) => (
+                    <tr key={l.ingredientId}>
+                      <td className="px-4 py-2 text-sm">
+                        <div className="font-semibold text-zinc-900">
+                          {l.label}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          {l.ingredientId.slice(-6)}
+                        </div>
                       </td>
-                    </tr>
-                  )}
 
-                  {!isLoading &&
-                    filteredIngredients.map((p, idx) => {
-                      const raw = qtyByIngredientId[p.id] ?? "";
-                      const n = toNum(raw);
-                      const isMissing = raw === "";
-                      const min = p.stock?.minQty ?? 0;
-                      const isBelowMin = min > 0 && n < min;
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() =>
+                              setLineQty(l.ingredientId, num(l.qty) - 1)
+                            }
+                            title="-1"
+                          >
+                            −
+                          </Button>
 
-                      return (
-                        <tr
-                          key={p.id}
-                          className={cn(
-                            "transition",
-                            compact ? "text-sm" : "text-base",
-                            isBelowMin ? "bg-amber-50/60" : "hover:bg-zinc-50"
-                          )}
+                          <Input
+                            value={String(l.qty ?? 0)}
+                            onChange={(e) =>
+                              setLineQty(l.ingredientId, Number(e.target.value))
+                            }
+                            inputMode="decimal"
+                            className="w-28"
+                            placeholder="0"
+                          />
+
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() =>
+                              setLineQty(l.ingredientId, num(l.qty) + 1)
+                            }
+                            title="+1"
+                          >
+                            +
+                          </Button>
+                        </div>
+
+                        {num(l.qty) <= 0 && (
+                          <div className="mt-1 text-xs text-red-700">
+                            Cantidad debe ser &gt; 0 para incluirse en el
+                            pedido.
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-2 text-right">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={() => removeLine(l.ingredientId)}
+                          title="Quitar ítem"
                         >
-                          <td className={cn("px-4", compact ? "py-2" : "py-3")}>
-                            <div className="font-semibold text-zinc-900">
-                              {p.name}
-                            </div>
-                            {isMissing && (
-                              <div className="mt-0.5 text-xs text-amber-700">
-                                Sin cargar
-                              </div>
-                            )}
-                            {isBelowMin && !isMissing && (
-                              <div className="mt-0.5 text-xs text-amber-700">
-                                Bajo mínimo ({min})
-                              </div>
-                            )}
-                          </td>
-
-                          <td
-                            className={cn(
-                              "px-4 text-zinc-700",
-                              compact ? "py-2" : "py-3"
-                            )}
-                          >
-                            {unitLabel(p.baseUnit)}
-                          </td>
-
-                          <td
-                            className={cn(
-                              "px-4 text-zinc-700",
-                              compact ? "py-2" : "py-3"
-                            )}
-                          >
-                            {min}
-                          </td>
-
-                          <td className={cn("px-4", compact ? "py-2" : "py-3")}>
-                            <Input
-                              value={raw}
-                              onChange={(e) => setQty(p.id, e.target.value)}
-                              placeholder="0"
-                              inputMode="decimal"
-                              className={cn(
-                                "w-32",
-                                isBelowMin
-                                  ? "border-amber-300 focus:ring-amber-200"
-                                  : ""
-                              )}
-                              disabled={saving}
-                              onKeyDown={(e) => {
-                                if (e.key === "+") {
-                                  e.preventDefault();
-                                  stepQty(p.id, 1);
-                                }
-                                if (e.key === "-") {
-                                  e.preventDefault();
-                                  stepQty(p.id, -1);
-                                }
-                                if (e.key === "Enter") {
-                                  const nextId =
-                                    filteredIngredients[idx + 1]?.id;
-                                  if (nextId) {
-                                    const el =
-                                      document.querySelector<HTMLInputElement>(
-                                        `input[data-stock="${nextId}"]`
-                                      );
-                                    el?.focus();
-                                  }
-                                }
-                              }}
-                              data-stock={p.id}
-                            />
-                          </td>
-
-                          <td className={cn("px-4", compact ? "py-2" : "py-3")}>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                disabled={saving}
-                                onClick={() => stepQty(p.id, -1)}
-                                title="-1"
-                              >
-                                <Minus className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                disabled={saving}
-                                onClick={() => stepQty(p.id, +1)}
-                                title="+1"
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                disabled={saving}
-                                onClick={() => setQty(p.id, "")}
-                                title="Vaciar"
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          Quitar
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
+          </div>
 
-            <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
-              Mostrando <b>{filteredIngredients.length}</b> de{" "}
-              <b>{activeIngredients.length}</b> ingredientes.
+          <div className="flex justify-end">
+            <Button onClick={createPO} loading={busy} disabled={busy}>
+              Crear pedido
+            </Button>
+          </div>
+
+          <div className="text-xs text-zinc-500">POST /purchase-orders</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+ * Page
+ * ========================================================================== */
+export default function ManagerStockPage() {
+  const { getAccessToken } = useAuth();
+
+  const [ingredients, setIngredients] = useState<IngredientRow[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  const suppliersById = useMemo(() => {
+    const m: Record<string, Supplier> = {};
+    for (const s of suppliers) m[s.id] = s;
+    return m;
+  }, [suppliers]);
+
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  // filters
+  const [q, setQ] = useState("");
+  const [onlyLow, setOnlyLow] = useState(false);
+  const [supplierId, setSupplierId] = useState<string>("ALL");
+
+  // selection for PO
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+
+  // modals
+  const [manualOpen, setManualOpen] = useState(false);
+  const [movsOpen, setMovsOpen] = useState(false);
+  const [activeIngredient, setActiveIngredient] =
+    useState<IngredientRow | null>(null);
+
+  // PO drawer
+  const [poOpen, setPoOpen] = useState(false);
+  const [poSupplierId, setPoSupplierId] = useState<string | null>(null);
+  const [poLines, setPoLines] = useState<
+    Array<{ ingredientId: string; label: string; qty: number }>
+  >([]);
+
+  function flashOk(msg: string) {
+    setOk(msg);
+    window.setTimeout(() => setOk(null), 1400);
+  }
+
+  async function loadAll() {
+    setErr(null);
+    setOk(null);
+    setLoading(true);
+    try {
+      const [sup, ing] = await Promise.all([
+        apiFetchAuthed<Supplier[]>(getAccessToken, API_SUPPLIERS),
+        apiFetchAuthed<IngredientRow[]>(
+          getAccessToken,
+          `${API_INGREDIENTS}?limit=800&activeOnly=true`
+        ),
+      ]);
+
+      setSuppliers(Array.isArray(sup) ? sup : []);
+      setIngredients(Array.isArray(ing) ? ing : []);
+      flashOk("Stock actualizado ✔");
+    } catch (e: any) {
+      setErr(e?.message || "Error cargando stock");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const rows = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+
+    return (ingredients || [])
+      .filter((i) => {
+        if (supplierId !== "ALL" && String(i.supplierId || "") !== supplierId)
+          return false;
+
+        if (qq) {
+          const s = `${i.name} ${i.displayName ?? ""} ${
+            i.name_for_supplier ?? ""
+          }`.toLowerCase();
+          if (!s.includes(qq)) return false;
+        }
+
+        const onHand = num(i.stock?.onHand);
+        const minQty = num(i.stock?.minQty);
+        if (onlyLow && !(minQty > 0 && onHand < minQty)) return false;
+
+        return true;
+      })
+      .sort((a, b) => prettyName(a).localeCompare(prettyName(b)));
+  }, [ingredients, q, onlyLow, supplierId]);
+
+  const totals = useMemo(() => {
+    const total = ingredients.length;
+    const low = ingredients.filter((i) => {
+      const onHand = num(i.stock?.onHand);
+      const minQty = num(i.stock?.minQty);
+      return minQty > 0 && onHand < minQty;
+    }).length;
+
+    const selectedCount = Object.values(selected).filter(Boolean).length;
+
+    return { total, low, selectedCount };
+  }, [ingredients, selected]);
+
+  function toggleSel(id: string) {
+    setSelected((p) => ({ ...p, [id]: !p[id] }));
+  }
+
+  function clearSel() {
+    setSelected({});
+  }
+
+  function openManual(i: IngredientRow) {
+    setActiveIngredient(i);
+    setManualOpen(true);
+  }
+
+  function openMovs(i: IngredientRow) {
+    setActiveIngredient(i);
+    setMovsOpen(true);
+  }
+
+  function buildSuggestedOrderForSupplier(supplier: string) {
+    const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+
+    return ingredients
+      .filter((i) => selectedIds.includes(i.id))
+      .filter((i) => String(i.supplierId || "") === supplier)
+      .map((i) => {
+        const onHand = num(i.stock?.onHand);
+        const minQty = num(i.stock?.minQty);
+        const ideal = i.stock?.idealQty != null ? num(i.stock.idealQty) : null;
+
+        const target =
+          ideal != null && ideal > 0 ? ideal : minQty > 0 ? minQty : 0;
+        const need = target > 0 ? Math.max(0, target - onHand) : 0;
+
+        return {
+          ingredientId: i.id,
+          label: prettyName(i),
+          qty: need > 0 ? need : 1, // fallback
+        };
+      });
+  }
+
+  function createPOFromSelection() {
+    setErr(null);
+
+    const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+    if (!selectedIds.length) {
+      setErr("Seleccioná al menos 1 ingrediente para armar un pedido.");
+      return;
+    }
+
+    const suppliersSet = new Set(
+      ingredients
+        .filter((i) => selectedIds.includes(i.id))
+        .map((i) => String(i.supplierId || ""))
+        .filter(Boolean)
+    );
+
+    const list = Array.from(suppliersSet);
+    if (list.length === 0) {
+      setErr("Los ingredientes seleccionados no tienen supplierId.");
+      return;
+    }
+
+    if (list.length > 1) {
+      setErr(
+        "Seleccionaste ingredientes de más de 1 proveedor. Por ahora armamos 1 pedido por vez (1 proveedor)."
+      );
+    }
+
+    const supplier = list[0];
+    const lines = buildSuggestedOrderForSupplier(supplier);
+
+    setPoSupplierId(supplier);
+    setPoLines(lines);
+    setPoOpen(true);
+  }
+
+  const poSupplierName =
+    poSupplierId && suppliersById[poSupplierId]
+      ? suppliersById[poSupplierId].name
+      : "Proveedor";
+
+  return (
+    <AdminProtected>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+                Stock (Manager)
+              </h1>
+              <p className="mt-1 text-sm text-zinc-500">
+                Ingredientes, stock actual, movimientos manuales y pedidos a
+                proveedores.
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                <span className="text-zinc-700">
+                  Ingredientes: <b>{totals.total}</b>
+                </span>
+                <span className="text-red-700">
+                  Bajo minQty: <b>{totals.low}</b>
+                </span>
+                <span className="text-zinc-700">
+                  Seleccionados: <b>{totals.selectedCount}</b>
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={loadAll}
+                loading={loading}
+                disabled={busy}
+                title="Actualizar"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                </span>
+              </Button>
+
+              <Button
+                onClick={createPOFromSelection}
+                disabled={busy || loading}
+                title="Crear pedido con seleccionados"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4" />
+                  Crear pedido
+                </span>
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={clearSel}
+                disabled={busy || loading}
+                title="Limpiar selección"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <X className="h-4 w-4" />
+                  Limpiar
+                </span>
+              </Button>
             </div>
           </div>
         </div>
+
+        {/* Notices */}
+        {(err || ok) && (
+          <div className="grid gap-2">
+            {err && <Notice tone="error">{err}</Notice>}
+            {!err && ok && <Notice tone="ok">{ok}</Notice>}
+          </div>
+        )}
+
+        {/* Filters */}
+        <Card>
+          <CardHeader title="Filtros" subtitle="Buscá y encontrá rápido" />
+          <CardBody>
+            <div className="grid gap-3 md:grid-cols-[1fr_260px_200px_auto] md:items-end">
+              <Field label="Buscar">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <Input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Nombre / displayName / nombre proveedor…"
+                    className="pl-9"
+                  />
+                </div>
+              </Field>
+
+              <Field label="Proveedor">
+                <Select
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                >
+                  <option value="ALL">Todos</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field label="Stock">
+                <Select
+                  value={onlyLow ? "LOW" : "ALL"}
+                  onChange={(e) => setOnlyLow(e.target.value === "LOW")}
+                >
+                  <option value="ALL">Todos</option>
+                  <option value="LOW">Solo bajo minQty</option>
+                </Select>
+              </Field>
+
+              <div className="text-sm text-zinc-500">
+                <span className="inline-flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  {rows.length} resultado(s)
+                </span>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Table */}
+        <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+          <div className="border-b border-zinc-100 px-5 py-4 flex items-center justify-between">
+            <div>
+              <div className="text-lg font-semibold text-zinc-900">
+                Ingredientes
+              </div>
+              <div className="text-sm text-zinc-500">
+                Seleccioná para pedido · Movimientos manuales · Auditoría
+              </div>
+            </div>
+            <div className="text-sm text-zinc-500">
+              {loading ? "Cargando…" : `${rows.length} fila(s)`}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Sel
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Ingrediente
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Proveedor
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Stock
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Min / Ideal
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Costo
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-zinc-100">
+                {loading && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-sm text-zinc-500">
+                      Cargando…
+                    </td>
+                  </tr>
+                )}
+
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-4 py-10 text-sm text-zinc-500"
+                    >
+                      No hay ingredientes con esos filtros.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  rows.map((i) => {
+                    const onHand = num(i.stock?.onHand);
+                    const minQty = num(i.stock?.minQty);
+                    const ideal =
+                      i.stock?.idealQty != null ? num(i.stock.idealQty) : null;
+                    const unit = i.baseUnit || "—";
+                    const supplierName =
+                      i.supplierId && suppliersById[i.supplierId]
+                        ? suppliersById[i.supplierId].name
+                        : "—";
+
+                    const low = minQty > 0 && onHand < minQty;
+
+                    return (
+                      <tr
+                        key={i.id}
+                        className={cn(
+                          "hover:bg-zinc-50",
+                          low && "bg-red-50/30"
+                        )}
+                      >
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selected[i.id])}
+                            onChange={() => toggleSel(i.id)}
+                          />
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-semibold text-zinc-900">
+                            {prettyName(i)}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {i.name_for_supplier
+                              ? `Prov: ${i.name_for_supplier} · `
+                              : ""}
+                            ID: {i.id.slice(-6)} · Unidad: {unit}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-zinc-700">
+                          {supplierName}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-semibold text-zinc-900">
+                              {onHand}
+                            </div>
+                            <StockPill onHand={onHand} minQty={minQty} />
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            trackStock: {String(i.stock?.trackStock ?? true)}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-zinc-700">
+                          <div>
+                            Min: <b>{minQty}</b>
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            Ideal: <b>{ideal != null ? ideal : "—"}</b>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-zinc-700">
+                          <div>
+                            Últ:{" "}
+                            <b>
+                              {money(
+                                num(i.cost?.lastCost),
+                                (i.cost?.currency ?? "ARS") as any
+                              )}
+                            </b>
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            Prom: {num(i.cost?.avgCost)}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-right">
+                          <div className="inline-flex flex-wrap justify-end gap-2">
+                            <Button
+                              variant="secondary"
+                              onClick={() => openManual(i)}
+                              disabled={busy}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Package className="h-4 w-4" />
+                                Movimiento
+                              </span>
+                            </Button>
+
+                            <Button
+                              variant="secondary"
+                              onClick={() => openMovs(i)}
+                              disabled={busy}
+                              title="Ver auditoría"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <ScrollText className="h-4 w-4" />
+                                Movs
+                              </span>
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
+            Si querés, sumamos “Editar minQty / idealQty” inline acá mismo.
+          </div>
+        </div>
+
+        {/* Modals */}
+        <ManualMoveModal
+          open={manualOpen}
+          onClose={() => setManualOpen(false)}
+          ingredient={activeIngredient}
+          suppliersById={suppliersById}
+          getAccessToken={getAccessToken}
+          onApplied={loadAll}
+        />
+
+        <MovementsModal
+          open={movsOpen}
+          onClose={() => setMovsOpen(false)}
+          ingredient={activeIngredient}
+          getAccessToken={getAccessToken}
+        />
+
+        <PurchaseOrderDrawer
+          open={poOpen}
+          onClose={() => setPoOpen(false)}
+          supplierId={poSupplierId}
+          supplierName={poSupplierName}
+          lines={poLines}
+          getAccessToken={getAccessToken}
+          onCreated={() => {
+            flashOk("Pedido creado ✔");
+            clearSel();
+          }}
+        />
       </div>
-    </Protected>
+    </AdminProtected>
   );
 }

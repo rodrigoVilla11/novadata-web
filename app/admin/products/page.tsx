@@ -25,10 +25,11 @@ import {
 } from "lucide-react";
 
 /* ============================================================================
- * Types
+ * Types (alineado a tu schema)
  * ========================================================================== */
 
 type Unit = "UNIT" | "KG" | "L";
+type Currency = "ARS" | "USD";
 
 type Supplier = { id: string; name: string; isActive: boolean };
 
@@ -46,8 +47,7 @@ type Ingredient = {
   supplierId: string;
   isActive: boolean;
   minQty: number;
-  // asumimos que existe cost.lastCost en backend ingredients
-  cost?: { lastCost?: number; currency?: "ARS" | "USD" };
+  cost?: { lastCost?: number; currency?: Currency };
 };
 
 type Preparation = {
@@ -56,7 +56,7 @@ type Preparation = {
   yieldQty: number;
   yieldUnit: Unit;
   isActive: boolean;
-  computed?: { unitCost?: number; totalCost?: number; currency?: "ARS" | "USD" };
+  computed?: { unitCost?: number; totalCost?: number; currency?: Currency };
 };
 
 type ProductItemType = "INGREDIENT" | "PREPARATION";
@@ -74,6 +74,9 @@ type Product = {
   name: string;
   description: string | null;
 
+  branchId?: string | null;
+  supplierId?: string | null;
+
   categoryId: string | null;
   categoryName: string | null;
 
@@ -86,17 +89,22 @@ type Product = {
   yieldQty: number;
   yieldUnit: Unit;
 
+  portionSize?: number | null;
+  portionLabel?: string | null;
+
   wastePct: number;
   extraCost: number;
   packagingCost: number;
 
-  currency: "ARS" | "USD";
+  currency: Currency;
 
   salePrice: number | null;
   marginPct: number | null;
 
   tags: string[];
+  allergens?: string[];
   imageUrl: string | null;
+  galleryUrls?: string[];
 
   isActive: boolean;
 
@@ -115,7 +123,7 @@ type Product = {
     suggestedPrice: number | null;
     marginPctUsed: number | null;
     grossMarginPct: number | null;
-    currency: "ARS" | "USD";
+    currency: Currency;
     computedAt: string | null;
   };
 
@@ -156,7 +164,7 @@ function parseTags(raw: string) {
     .map((x) => x.toLowerCase());
 }
 
-function money(n: number, currency: "ARS" | "USD" = "ARS") {
+function money(n: number, currency: Currency = "ARS") {
   const v = Number(n ?? 0) || 0;
   return v.toLocaleString("es-AR", { style: "currency", currency });
 }
@@ -256,7 +264,7 @@ export default function AdminProductsPage() {
   const [extraCost, setExtraCost] = useState("0");
   const [packagingCost, setPackagingCost] = useState("0");
 
-  const [currency, setCurrency] = useState<"ARS" | "USD">("ARS");
+  const [currency, setCurrency] = useState<Currency>("ARS");
 
   const [salePrice, setSalePrice] = useState(""); // if set, overrides suggested
   const [marginPct, setMarginPct] = useState("0.3"); // 0..1
@@ -272,13 +280,49 @@ export default function AdminProductsPage() {
 
   const [itemsDraft, setItemsDraft] = useState<ProductItemDraft[]>([]);
 
+  // details / edit drawer
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selected, setSelected] = useState<Product | null>(null);
+
+  // edit drafts
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategoryId, setEditCategoryId] = useState<string>("");
+  const [editSku, setEditSku] = useState("");
+  const [editBarcode, setEditBarcode] = useState("");
+  const [editTagsRaw, setEditTagsRaw] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+
+  const [editYieldQty, setEditYieldQty] = useState("1");
+  const [editYieldUnit, setEditYieldUnit] = useState<Unit>("UNIT");
+
+  const [editWastePct, setEditWastePct] = useState("0");
+  const [editExtraCost, setEditExtraCost] = useState("0");
+  const [editPackagingCost, setEditPackagingCost] = useState("0");
+
+  const [editCurrency, setEditCurrency] = useState<Currency>("ARS");
+  const [editSalePrice, setEditSalePrice] = useState("");
+  const [editMarginPct, setEditMarginPct] = useState("0.3");
+
+  const [editIsSellable, setEditIsSellable] = useState(true);
+  const [editIsProduced, setEditIsProduced] = useState(true);
+
+  const [editItemsDraft, setEditItemsDraft] = useState<ProductItemDraft[]>([]);
+
+  // item adder dentro del drawer
+  const [editAddPickId, setEditAddPickId] = useState<string>("");
+  const [editAddQty, setEditAddQty] = useState<string>("1");
+  const [editAddNote, setEditAddNote] = useState<string>("");
+  const [editAddSearch, setEditAddSearch] = useState<string>("");
+
   const activeCategories = useMemo(
     () =>
       (categories || [])
         .filter((c) => c.isActive !== false)
         .sort(
           (a, b) =>
-            (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name)
+            (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+            a.name.localeCompare(b.name)
         ),
     [categories]
   );
@@ -329,6 +373,35 @@ export default function AdminProductsPage() {
     return all.filter((o) => o.search.includes(s));
   }, [activeIngredients, activePreparations, activeSuppliers, addSearch]);
 
+  // drawer options
+  const editAddOptions = useMemo(() => {
+    const supplierNameById = new Map(activeSuppliers.map((s) => [s.id, s.name]));
+
+    const ing = activeIngredients.map((i) => {
+      const sup = i.supplierId ? supplierNameById.get(i.supplierId) : null;
+      return {
+        id: `I:${i.id}`,
+        kind: "INGREDIENT" as const,
+        refId: i.id,
+        label: `${i.name} · ${unitLabel(i.unit)}${sup ? ` · ${sup}` : ""}`,
+        search: `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
+      };
+    });
+
+    const preps = activePreparations.map((p) => ({
+      id: `P:${p.id}`,
+      kind: "PREPARATION" as const,
+      refId: p.id,
+      label: `${p.name} · (${p.yieldQty} ${unitLabel(p.yieldUnit)})`,
+      search: `${p.name} ${p.id}`.toLowerCase(),
+    }));
+
+    const all = [...ing, ...preps];
+    const s = editAddSearch.trim().toLowerCase();
+    if (!s) return all;
+    return all.filter((o) => o.search.includes(s));
+  }, [activeIngredients, activePreparations, activeSuppliers, editAddSearch]);
+
   const filteredProducts = useMemo(() => {
     let base = products;
 
@@ -377,7 +450,6 @@ export default function AdminProductsPage() {
       setPreparations(preps);
       setProducts(prods);
 
-      // default category selection
       if (!categoryId && cats?.length) {
         const first = cats.find((c) => c.isActive !== false) || cats[0];
         if (first) setCategoryId(first.id);
@@ -413,7 +485,6 @@ export default function AdminProductsPage() {
     const [prefix, refId] = addPickId.split(":");
     const type: ProductItemType = prefix === "P" ? "PREPARATION" : "INGREDIENT";
 
-    // avoid duplicates
     const key = `${prefix}:${refId}`;
     const exists = itemsDraft.some((it) => {
       const k =
@@ -567,6 +638,11 @@ export default function AdminProductsPage() {
         body: JSON.stringify({ isActive: next }),
       });
       await loadAll();
+
+      // si está abierto el drawer, refrescamos selected también
+      if (selected?.id === p.id) {
+        setSelected((prev) => (prev ? { ...prev, isActive: next } : prev));
+      }
     } catch (e: any) {
       setErr(e?.message || "Error actualizando estado");
     } finally {
@@ -587,6 +663,209 @@ export default function AdminProductsPage() {
       setTimeout(() => setOk(null), 1200);
     } catch (e: any) {
       setErr(e?.message || "Error recalculando");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ============================================================================
+   * Details / Edit actions (alineado a controller: GET/:id y PATCH/:id)
+   * ========================================================================== */
+
+  async function openDetails(p: Product) {
+    setErr(null);
+    setOk(null);
+    setBusy(true);
+
+    try {
+      // traemos el producto fresco (por si la lista no tiene computed / items completos)
+      const full = await apiFetchAuthed<Product>(getAccessToken, `/products/${p.id}`);
+
+      setSelected(full);
+
+      setEditName(full.name ?? "");
+      setEditDescription(full.description ?? "");
+      setEditCategoryId(full.categoryId ?? "");
+      setEditSku(full.sku ?? "");
+      setEditBarcode(full.barcode ?? "");
+      setEditTagsRaw((full.tags ?? []).join(", "));
+      setEditImageUrl(full.imageUrl ?? "");
+
+      setEditYieldQty(String(full.yieldQty ?? 1));
+      setEditYieldUnit((full.yieldUnit ?? "UNIT") as Unit);
+
+      setEditWastePct(String(full.wastePct ?? 0));
+      setEditExtraCost(String(full.extraCost ?? 0));
+      setEditPackagingCost(String(full.packagingCost ?? 0));
+
+      setEditCurrency((full.currency ?? "ARS") as any);
+      setEditSalePrice(full.salePrice == null ? "" : String(full.salePrice));
+      setEditMarginPct(full.marginPct == null ? "" : String(full.marginPct));
+
+      setEditIsSellable(!!full.isSellable);
+      setEditIsProduced(!!full.isProduced);
+
+      setEditItemsDraft(
+        (full.items ?? []).map((it) => ({
+          type: it.type,
+          ingredientId: it.ingredientId ?? undefined,
+          preparationId: it.preparationId ?? undefined,
+          qty: String(it.qty ?? 0),
+          note: it.note ?? "",
+        }))
+      );
+
+      setEditAddPickId("");
+      setEditAddQty("1");
+      setEditAddNote("");
+      setEditAddSearch("");
+
+      setDetailsOpen(true);
+    } catch (e: any) {
+      setErr(e?.message || "Error cargando detalle del producto");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function closeDetails() {
+    setDetailsOpen(false);
+    setSelected(null);
+  }
+
+  function editRemoveItem(idx: number) {
+    setEditItemsDraft((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function editSetItemQty(idx: number, v: string) {
+    if (!isValidNumberDraft(v)) return;
+    setEditItemsDraft((prev) =>
+      prev.map((it, i) => (i === idx ? { ...it, qty: v } : it))
+    );
+  }
+
+  function editSetItemNote(idx: number, v: string) {
+    setEditItemsDraft((prev) =>
+      prev.map((it, i) => (i === idx ? { ...it, note: v } : it))
+    );
+  }
+
+  function editAddItem() {
+    if (!editAddPickId) return;
+
+    const qty = toNum(editAddQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setErr("La cantidad debe ser > 0");
+      return;
+    }
+
+    const [prefix, refId] = editAddPickId.split(":");
+    const type: ProductItemType = prefix === "P" ? "PREPARATION" : "INGREDIENT";
+
+    const key = `${prefix}:${refId}`;
+    const exists = editItemsDraft.some((it) => {
+      const k =
+        it.type === "INGREDIENT"
+          ? `I:${it.ingredientId}`
+          : `P:${it.preparationId}`;
+      return k === key;
+    });
+    if (exists) {
+      setErr("Ese item ya fue agregado.");
+      return;
+    }
+
+    setEditItemsDraft((prev) => [
+      ...prev,
+      type === "INGREDIENT"
+        ? { type: "INGREDIENT", ingredientId: refId, qty: String(qty), note: editAddNote || "" }
+        : { type: "PREPARATION", preparationId: refId, qty: String(qty), note: editAddNote || "" },
+    ]);
+
+    setEditAddPickId("");
+    setEditAddQty("1");
+    setEditAddNote("");
+  }
+
+  async function saveEdits() {
+    if (!selected) return;
+
+    if (!editName.trim()) {
+      setErr("Nombre requerido");
+      return;
+    }
+    if (!editItemsDraft.length) {
+      setErr("Agregá al menos 1 item.");
+      return;
+    }
+
+    const payload = {
+      name: editName.trim(),
+      description: editDescription.trim() || null,
+      categoryId: editCategoryId || null,
+      // si querés mantener categoryName desde backend, NO lo mandamos
+      sku: editSku.trim() || null,
+      barcode: editBarcode.trim() || null,
+
+      tags: parseTags(editTagsRaw),
+      imageUrl: editImageUrl.trim() || null,
+
+      // dejamos galleryUrls como está si tu update lo soporta; si no, no lo mandes
+      // galleryUrls: selected.galleryUrls ?? [],
+
+      isSellable: editIsSellable,
+      isProduced: editIsProduced,
+
+      yieldQty: Math.max(0.000001, toNum(editYieldQty) || 1),
+      yieldUnit: editYieldUnit,
+
+      wastePct: Math.max(0, Math.min(1, toNum(editWastePct))),
+      extraCost: Math.max(0, toNum(editExtraCost)),
+      packagingCost: Math.max(0, toNum(editPackagingCost)),
+
+      currency: editCurrency,
+
+      salePrice: editSalePrice.trim() === "" ? null : Math.max(0, toNum(editSalePrice)),
+      marginPct:
+        editMarginPct.trim() === ""
+          ? null
+          : Math.max(0, Math.min(1, toNum(editMarginPct))),
+
+      items: editItemsDraft.map((it) => ({
+        type: it.type,
+        ingredientId: it.type === "INGREDIENT" ? it.ingredientId : null,
+        preparationId: it.type === "PREPARATION" ? it.preparationId : null,
+        qty: Math.max(0, toNum(it.qty)),
+        note: (it.note || "").trim() || null,
+      })),
+    };
+
+    setBusy(true);
+    setErr(null);
+    setOk(null);
+
+    try {
+      await apiFetchAuthed(getAccessToken, `/products/${selected.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      setOk("Producto actualizado ✔");
+      setTimeout(() => setOk(null), 1200);
+
+      await loadAll();
+
+      // recargamos detalle para ver computed actualizado si tu backend recalcula en update
+      try {
+        const refreshed = await apiFetchAuthed<Product>(getAccessToken, `/products/${selected.id}`);
+        setSelected(refreshed);
+      } catch {}
+
+      setDetailsOpen(false);
+      setSelected(null);
+    } catch (e: any) {
+      setErr(e?.message || "Error actualizando producto");
     } finally {
       setBusy(false);
     }
@@ -630,7 +909,8 @@ export default function AdminProductsPage() {
         ? null
         : Math.max(0, Math.min(1, toNum(marginPct)));
 
-    const suggestedPrice = sp != null ? null : m != null ? unitCost * (1 + m) : null;
+    const suggestedPrice =
+      sp != null ? null : m != null ? unitCost * (1 + m) : null;
 
     return { ingredientsCost, totalCost, unitCost, suggestedPrice };
   }, [
@@ -1071,9 +1351,7 @@ export default function AdminProductsPage() {
                       <div className="text-zinc-700">
                         Precio sugerido:{" "}
                         <b>
-                          {preview.suggestedPrice == null
-                            ? "—"
-                            : money(preview.suggestedPrice, currency)}
+                          {preview.suggestedPrice == null ? "—" : money(preview.suggestedPrice, currency)}
                         </b>
                       </div>
                     </div>
@@ -1107,7 +1385,7 @@ export default function AdminProductsPage() {
                   (p.categoryId ? activeCategories.find((c) => c.id === p.categoryId)?.name : null) ||
                   "—";
 
-                const ccy = p.currency || "ARS";
+                const ccy = (p.currency || "ARS") as Currency;
                 const unitCost = Number(p.computed?.unitCost ?? 0) || 0;
                 const totalCost = Number(p.computed?.totalCost ?? 0) || 0;
 
@@ -1181,6 +1459,15 @@ export default function AdminProductsPage() {
 
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={() => openDetails(p)}
+                          disabled={busy}
+                        >
+                          <Layers className="h-4 w-4" />
+                          Detalles
+                        </Button>
+
                         <Button variant="secondary" onClick={() => recompute(p)} disabled={busy}>
                           <RotateCcw className="h-4 w-4" />
                           Recompute
@@ -1222,6 +1509,378 @@ export default function AdminProductsPage() {
         <div className="text-xs text-zinc-500">
           Mostrando <b>{filteredProducts.length}</b> de <b>{products.length}</b> productos.
         </div>
+
+        {/* Details Drawer */}
+        {detailsOpen && selected && (
+          <div className="fixed inset-0 z-50">
+            {/* backdrop */}
+            <button
+              className="absolute inset-0 bg-black/30"
+              onClick={closeDetails}
+              aria-label="Cerrar"
+            />
+
+            {/* panel */}
+            <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl border-l border-zinc-200">
+              <div className="flex items-start justify-between gap-3 p-5 border-b">
+                <div>
+                  <div className="text-xs text-zinc-500">Detalles de producto</div>
+                  <div className="text-lg font-semibold text-zinc-900">{selected.name}</div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    ID: <span className="font-mono">{selected.id}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button variant="secondary" onClick={() => recompute(selected)} disabled={busy}>
+                    <RotateCcw className="h-4 w-4" />
+                    Recompute
+                  </Button>
+
+                  <Button
+                    variant={selected.isActive ? "danger" : "secondary"}
+                    onClick={() => toggleActive(selected)}
+                    disabled={busy}
+                  >
+                    <Power className="h-4 w-4" />
+                    {selected.isActive ? "Desactivar" : "Reactivar"}
+                  </Button>
+
+                  <Button variant="ghost" onClick={closeDetails}>
+                    ✕
+                  </Button>
+                </div>
+              </div>
+
+              <div className="h-[calc(100%-72px)] overflow-auto p-5 space-y-6">
+                {/* basic */}
+                <div className="grid gap-4 md:grid-cols-6">
+                  <Field label="Nombre">
+                    <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  </Field>
+
+                  <Field label="Categoría">
+                    <Select
+                      value={editCategoryId}
+                      onChange={(e) => setEditCategoryId(e.target.value)}
+                    >
+                      <option value="">(Sin categoría)</option>
+                      {activeCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+
+                  <Field label="SKU">
+                    <Input value={editSku} onChange={(e) => setEditSku(e.target.value)} />
+                  </Field>
+
+                  <Field label="Barcode">
+                    <Input value={editBarcode} onChange={(e) => setEditBarcode(e.target.value)} />
+                  </Field>
+
+                  <Field label="Tags">
+                    <Input
+                      value={editTagsRaw}
+                      onChange={(e) => setEditTagsRaw(e.target.value)}
+                      placeholder="coma separadas"
+                    />
+                  </Field>
+
+                  <Field label="Image URL">
+                    <Input
+                      value={editImageUrl}
+                      onChange={(e) => setEditImageUrl(e.target.value)}
+                      placeholder="https://..."
+                    />
+                  </Field>
+                </div>
+
+                <Field label="Descripción">
+                  <Input
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                  />
+                </Field>
+
+                {/* recipe & cost */}
+                <div className="grid gap-4 md:grid-cols-6">
+                  <Field label="Yield Qty">
+                    <Input
+                      value={editYieldQty}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setEditYieldQty(e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Yield Unit">
+                    <Select
+                      value={editYieldUnit}
+                      onChange={(e) => setEditYieldUnit(e.target.value as Unit)}
+                    >
+                      <option value="UNIT">Unidad</option>
+                      <option value="KG">Kg</option>
+                      <option value="L">Litros</option>
+                    </Select>
+                  </Field>
+
+                  <Field label="Waste % (0..1)">
+                    <Input
+                      value={editWastePct}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setEditWastePct(e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Extra cost">
+                    <Input
+                      value={editExtraCost}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setEditExtraCost(e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Packaging">
+                    <Input
+                      value={editPackagingCost}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setEditPackagingCost(e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Moneda">
+                    <Select
+                      value={editCurrency}
+                      onChange={(e) => setEditCurrency(e.target.value as any)}
+                    >
+                      <option value="ARS">ARS</option>
+                      <option value="USD">USD</option>
+                    </Select>
+                  </Field>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-6">
+                  <Field label="Sale price (opcional)">
+                    <Input
+                      value={editSalePrice}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setEditSalePrice(e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Margin % (0..1)">
+                    <Input
+                      value={editMarginPct}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setEditMarginPct(e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  <div className="md:col-span-4 flex items-end gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setEditIsSellable((v) => !v)}
+                      className={cn(
+                        "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
+                        editIsSellable
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+                      )}
+                    >
+                      {editIsSellable ? "Sellable ✅" : "Sellable ❌"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEditIsProduced((v) => !v)}
+                      className={cn(
+                        "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
+                        editIsProduced
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+                      )}
+                    >
+                      {editIsProduced ? "Producido ✅" : "Producido ❌"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* items */}
+                <div className="rounded-2xl border border-zinc-200 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                    <Layers className="h-4 w-4" /> Composición (items)
+                  </div>
+
+                  <div className="mt-3 grid gap-3 md:grid-cols-6">
+                    <Field label="Buscar (global)">
+                      <Input
+                        value={editAddSearch}
+                        onChange={(e) => setEditAddSearch(e.target.value)}
+                        placeholder="Buscá ingrediente o preparación…"
+                      />
+                    </Field>
+
+                    <Field label="Item">
+                      <Select
+                        value={editAddPickId}
+                        onChange={(e) => setEditAddPickId(e.target.value)}
+                      >
+                        <option value="">Seleccionar…</option>
+                        {editAddOptions.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+
+                    <Field label="Cantidad">
+                      <Input
+                        value={editAddQty}
+                        onChange={(e) =>
+                          isValidNumberDraft(e.target.value) && setEditAddQty(e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Nota">
+                      <Input
+                        value={editAddNote}
+                        onChange={(e) => setEditAddNote(e.target.value)}
+                        placeholder="Opcional"
+                      />
+                    </Field>
+
+                    <div className="flex items-end">
+                      <Button variant="secondary" onClick={editAddItem} disabled={!editAddPickId}>
+                        <Plus className="h-4 w-4" />
+                        Agregar
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 overflow-hidden rounded-xl border border-zinc-200">
+                    <table className="min-w-full">
+                      <thead className="bg-zinc-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Tipo</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Item</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Qty</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Nota</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Acción</th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-zinc-100">
+                        {editItemsDraft.map((it, idx) => {
+                          const label =
+                            it.type === "INGREDIENT"
+                              ? activeIngredients.find((x) => x.id === it.ingredientId)?.name || "—"
+                              : activePreparations.find((x) => x.id === it.preparationId)?.name || "—";
+
+                          return (
+                            <tr key={idx} className="hover:bg-zinc-50">
+                              <td className="px-4 py-3 text-sm">{it.type}</td>
+                              <td className="px-4 py-3 font-medium">{label}</td>
+                              <td className="px-4 py-3">
+                                <Input
+                                  value={it.qty}
+                                  onChange={(e) => editSetItemQty(idx, e.target.value)}
+                                  className="w-28"
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <Input
+                                  value={it.note ?? ""}
+                                  onChange={(e) => editSetItemNote(idx, e.target.value)}
+                                  placeholder="—"
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <Button variant="ghost" onClick={() => editRemoveItem(idx)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                        {editItemsDraft.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
+                              Agregá ingredientes o preparaciones.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* computed read-only */}
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
+                  <div className="font-semibold text-zinc-900">Costos calculados (backend)</div>
+                  <div className="mt-2 grid gap-1 text-zinc-700">
+                    <div>
+                      Ingredients cost:{" "}
+                      <b>{money(Number(selected.computed?.ingredientsCost ?? 0) || 0, selected.currency || "ARS")}</b>
+                    </div>
+                    <div>
+                      Total cost:{" "}
+                      <b>{money(Number(selected.computed?.totalCost ?? 0) || 0, selected.currency || "ARS")}</b>
+                    </div>
+                    <div>
+                      Unit cost:{" "}
+                      <b>{money(Number(selected.computed?.unitCost ?? 0) || 0, selected.currency || "ARS")}</b>
+                      {" "} / {unitLabel(selected.yieldUnit)}
+                    </div>
+                    <div>
+                      Suggested:{" "}
+                      <b>
+                        {selected.computed?.suggestedPrice == null
+                          ? "—"
+                          : money(selected.computed.suggestedPrice, selected.currency || "ARS")}
+                      </b>
+                    </div>
+                    <div>
+                      Margin used:{" "}
+                      <b>{selected.computed?.marginPctUsed == null ? "—" : pct(selected.computed.marginPctUsed)}</b>
+                    </div>
+                    <div>
+                      Gross margin:{" "}
+                      <b>{selected.computed?.grossMarginPct == null ? "—" : pct(selected.computed.grossMarginPct)}</b>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* footer */}
+              <div className="absolute bottom-0 left-0 right-0 border-t bg-white p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-zinc-500">
+                    Guardar = PATCH /products/:id (incluye items).
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" onClick={closeDetails} disabled={busy}>
+                      Cancelar
+                    </Button>
+                    <Button onClick={saveEdits} disabled={busy || !editName.trim()}>
+                      Guardar cambios
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AdminProtected>
   );
