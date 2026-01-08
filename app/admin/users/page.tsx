@@ -6,34 +6,33 @@ import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
-
 import {
   RefreshCcw,
   Search,
   Plus,
-  Shield,
-  User as UserIcon,
-  Briefcase,
   KeyRound,
   Power,
-  Copy,
-  CheckCircle2,
-  AlertTriangle,
   X,
 } from "lucide-react";
 
 /* ============================================================================
- * Types & helpers
+ * Types
  * ========================================================================== */
 
-type Role = "USER" | "ADMIN" | "MANAGER" | "CASHIER";
+type Role = "USER" | "MANAGER" | "CASHIER"; // ✅ ADMIN NO acá (no puede ser asignado por ADMIN)
 
 type UserRow = {
   id: string;
   email: string;
-  roles: Role[];
+  username?: string | null;
+  roles: Array<"USER" | "ADMIN" | "MANAGER" | "CASHIER" | "SUPERADMIN">;
   isActive: boolean;
+  branchId?: string | null;
 };
+
+/* ============================================================================
+ * Helpers
+ * ========================================================================== */
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -43,7 +42,7 @@ function cn(...classes: Array<string | false | null | undefined>) {
  * Pills
  * ========================================================================== */
 
-function RolePill({ role }: { role: Role }) {
+function RolePill({ role }: { role: UserRow["roles"][number] }) {
   return (
     <span
       className={cn(
@@ -54,6 +53,8 @@ function RolePill({ role }: { role: Role }) {
           ? "bg-blue-50 text-blue-700 border-blue-200"
           : role === "CASHIER"
           ? "bg-amber-50 text-amber-800 border-amber-200"
+          : role === "SUPERADMIN"
+          ? "bg-indigo-50 text-indigo-800 border-indigo-200"
           : "bg-zinc-100 text-zinc-800 border-zinc-200"
       )}
     >
@@ -78,7 +79,7 @@ function StatusPill({ active }: { active: boolean }) {
 }
 
 /* ============================================================================
- * Page
+ * Page (ruta Next: /admin/users)
  * ========================================================================== */
 
 export default function AdminUsersPage() {
@@ -98,6 +99,7 @@ export default function AdminUsersPage() {
   const [createOpen, setCreateOpen] = useState(true);
   const [newEmail, setNewEmail] = useState("");
   const [newPass, setNewPass] = useState("");
+  const [newUsername, setNewUsername] = useState("");
   const [newRole, setNewRole] = useState<Role>("USER");
 
   // reset modal
@@ -107,17 +109,12 @@ export default function AdminUsersPage() {
 
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  /* ============================================================================
-   * Derived
-   * ========================================================================== */
-
   const filtered = useMemo(() => {
     let base = users;
     if (onlyActive) base = base.filter((u) => u.isActive);
     if (!q.trim()) return base;
-    return base.filter((u) =>
-      u.email.toLowerCase().includes(q.trim().toLowerCase())
-    );
+    const needle = q.trim().toLowerCase();
+    return base.filter((u) => u.email.toLowerCase().includes(needle));
   }, [users, q, onlyActive]);
 
   const totals = useMemo(() => {
@@ -127,11 +124,12 @@ export default function AdminUsersPage() {
       admins: users.filter((u) => u.roles.includes("ADMIN")).length,
       managers: users.filter((u) => u.roles.includes("MANAGER")).length,
       cashiers: users.filter((u) => u.roles.includes("CASHIER")).length,
+      users: users.filter((u) => u.roles.includes("USER")).length,
     };
   }, [users]);
 
   /* ============================================================================
-   * API
+   * API (Backend nuevo: /users)
    * ========================================================================== */
 
   async function load() {
@@ -139,11 +137,9 @@ export default function AdminUsersPage() {
     setOkMsg(null);
     setLoadingList(true);
     try {
-      const data = await apiFetchAuthed<UserRow[]>(
-        getAccessToken,
-        "/admin/users"
-      );
-      setUsers(data);
+      // ✅ ADMIN: esto devuelve SOLO users de su branch (scoping en backend)
+      const data = await apiFetchAuthed<UserRow[]>(getAccessToken, "/users");
+      setUsers(Array.isArray(data) ? data : []);
     } catch (e: any) {
       setError(e?.message || "Error cargando usuarios");
     } finally {
@@ -157,20 +153,29 @@ export default function AdminUsersPage() {
   }, []);
 
   async function createUser() {
-    if (!newEmail || !newPass) return;
+    if (!newEmail.trim() || !newPass) return;
+
     setBusyAction(true);
+    setError(null);
+    setOkMsg(null);
+
     try {
-      await apiFetchAuthed(getAccessToken, "/admin/users", {
+      await apiFetchAuthed(getAccessToken, "/users", {
         method: "POST",
         body: JSON.stringify({
-          email: newEmail,
+          email: newEmail.trim().toLowerCase(),
           password: newPass,
-          roles: [newRole],
+          roles: [newRole], // ✅ USER/MANAGER/CASHIER
+          username: newUsername.trim() || null,
+          // branchId NO se manda: backend lo fuerza por actor.branchId
         }),
       });
+
       setNewEmail("");
       setNewPass("");
+      setNewUsername("");
       setNewRole("USER");
+
       setOkMsg("Usuario creado ✔");
       await load();
     } catch (e: any) {
@@ -182,12 +187,18 @@ export default function AdminUsersPage() {
 
   async function setRoles(id: string, roles: Role[]) {
     setBusyAction(true);
+    setError(null);
+    setOkMsg(null);
+
     try {
-      await apiFetchAuthed(getAccessToken, `/admin/users/${id}/roles`, {
+      await apiFetchAuthed(getAccessToken, `/users/${id}/roles`, {
         method: "PATCH",
         body: JSON.stringify({ roles }),
       });
       await load();
+      setOkMsg("Roles actualizados ✔");
+    } catch (e: any) {
+      setError(e?.message || "Error actualizando roles");
     } finally {
       setBusyAction(false);
     }
@@ -195,19 +206,23 @@ export default function AdminUsersPage() {
 
   async function toggleActive(u: UserRow) {
     const ok = window.confirm(
-      u.isActive
-        ? `¿Desactivar a ${u.email}?`
-        : `¿Reactivar a ${u.email}?`
+      u.isActive ? `¿Desactivar a ${u.email}?` : `¿Reactivar a ${u.email}?`
     );
     if (!ok) return;
 
     setBusyAction(true);
+    setError(null);
+    setOkMsg(null);
+
     try {
-      await apiFetchAuthed(getAccessToken, `/admin/users/${u.id}/active`, {
+      await apiFetchAuthed(getAccessToken, `/users/${u.id}/active`, {
         method: "PATCH",
         body: JSON.stringify({ isActive: !u.isActive }),
       });
       await load();
+      setOkMsg(u.isActive ? "Usuario desactivado ✔" : "Usuario reactivado ✔");
+    } catch (e: any) {
+      setError(e?.message || "Error cambiando estado");
     } finally {
       setBusyAction(false);
     }
@@ -215,20 +230,25 @@ export default function AdminUsersPage() {
 
   async function submitReset() {
     if (!resetUser || !resetPass) return;
+
     setBusyAction(true);
+    setError(null);
+    setOkMsg(null);
+
     try {
-      await apiFetchAuthed(
-        getAccessToken,
-        `/admin/users/${resetUser.id}/password`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ password: resetPass }),
-        }
-      );
+      await apiFetchAuthed(getAccessToken, `/users/${resetUser.id}/password`, {
+        method: "PATCH",
+        body: JSON.stringify({ newPassword: resetPass }), // ✅ backend nuevo usa newPassword
+      });
+
       setResetOpen(false);
       setResetUser(null);
       setResetPass("");
+
       setOkMsg("Password reseteada ✔");
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Error reseteando password");
     } finally {
       setBusyAction(false);
     }
@@ -243,20 +263,44 @@ export default function AdminUsersPage() {
       {/* Header */}
       <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Usuarios
+          Usuarios (Branch)
         </h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Gestión de accesos, roles y estado de usuarios.
+          Gestión de accesos, roles y estado de usuarios de tu sucursal.
         </p>
 
         <div className="mt-4 flex flex-wrap gap-4 text-sm">
-          <span>Total: <b>{totals.total}</b></span>
-          <span className="text-emerald-700">Activos: <b>{totals.active}</b></span>
-          <span className="text-blue-700">Managers: <b>{totals.managers}</b></span>
-          <span className="text-amber-700">Cashiers: <b>{totals.cashiers}</b></span>
-          <span className="text-zinc-900">Admins: <b>{totals.admins}</b></span>
+          <span>
+            Total: <b>{totals.total}</b>
+          </span>
+          <span className="text-emerald-700">
+            Activos: <b>{totals.active}</b>
+          </span>
+          <span className="text-blue-700">
+            Managers: <b>{totals.managers}</b>
+          </span>
+          <span className="text-amber-700">
+            Cashiers: <b>{totals.cashiers}</b>
+          </span>
+          <span className="text-zinc-900">
+            Admins: <b>{totals.admins}</b>
+          </span>
         </div>
       </div>
+
+      {/* Alerts */}
+      {(error || okMsg) && (
+        <div
+          className={cn(
+            "rounded-2xl border p-4 text-sm",
+            error
+              ? "border-red-200 bg-red-50 text-red-800"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+          )}
+        >
+          {error || okMsg}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -302,7 +346,7 @@ export default function AdminUsersPage() {
               Crear usuario
             </div>
             <div className="mt-1 text-sm text-zinc-500">
-              Solo ADMIN puede crear usuarios.
+              Como ADMIN, podés crear USER / MANAGER / CASHIER para tu sucursal.
             </div>
           </div>
 
@@ -318,10 +362,7 @@ export default function AdminUsersPage() {
           <CardBody>
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="Email">
-                <Input
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                />
+                <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               </Field>
 
               <Field label="Password">
@@ -332,25 +373,28 @@ export default function AdminUsersPage() {
                 />
               </Field>
 
+              <Field label="Username (opcional)">
+                <Input
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                />
+              </Field>
+
               <Field label="Rol">
-                <Select
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as Role)}
-                >
+                <Select value={newRole} onChange={(e) => setNewRole(e.target.value as Role)}>
                   <option value="USER">USER</option>
                   <option value="MANAGER">MANAGER</option>
                   <option value="CASHIER">CASHIER</option>
-                  <option value="ADMIN">ADMIN</option>
                 </Select>
               </Field>
 
-              <div className="flex items-end">
+              <div className="md:col-span-4 flex items-end">
                 <Button
                   className="w-full"
                   onClick={createUser}
-                  disabled={busyAction || !newEmail || !newPass}
+                  disabled={busyAction || !newEmail.trim() || !newPass}
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-4 w-4 mr-2" />
                   Crear
                 </Button>
               </div>
@@ -370,6 +414,9 @@ export default function AdminUsersPage() {
               <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 uppercase">
                 Roles
               </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 uppercase">
+                Acciones
+              </th>
             </tr>
           </thead>
 
@@ -378,32 +425,69 @@ export default function AdminUsersPage() {
               <tr key={u.id} className="hover:bg-zinc-50 transition">
                 <td className="px-4 py-3">
                   <div className="font-semibold text-zinc-900">{u.email}</div>
-                  <StatusPill active={u.isActive} />
+                  <div className="mt-1 flex items-center gap-2">
+                    <StatusPill active={u.isActive} />
+                    {u.username ? (
+                      <span className="text-xs text-zinc-500 truncate">
+                        {u.username}
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
 
-                <td className="px-4 py-3 flex flex-wrap gap-2">
-                  {u.roles.map((r) => (
-                    <RolePill key={r} role={r} />
-                  ))}
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-2">
+                    {u.roles.map((r) => (
+                      <RolePill key={r} role={r} />
+                    ))}
+                  </div>
                 </td>
 
-                <td className="px-4 py-3 flex flex-wrap gap-2">
-                  <Button variant="secondary" onClick={() => setRoles(u.id, ["USER"])}>USER</Button>
-                  <Button variant="secondary" onClick={() => setRoles(u.id, ["MANAGER"])}>MANAGER</Button>
-                  <Button variant="secondary" onClick={() => setRoles(u.id, ["CASHIER"])}>CASHIER</Button>
-                  <Button variant="secondary" onClick={() => setRoles(u.id, ["ADMIN"])}>ADMIN</Button>
-                  <Button variant="secondary" onClick={() => { setResetUser(u); setResetOpen(true); }}>
-                    <KeyRound className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={u.isActive ? "danger" : "secondary"}
-                    onClick={() => toggleActive(u)}
-                  >
-                    <Power className="h-4 w-4" />
-                  </Button>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-2">
+                    {/* ✅ ADMIN NO puede asignar ADMIN: botones solo USER/MANAGER/CASHIER */}
+                    <Button variant="secondary" onClick={() => setRoles(u.id, ["USER"])} disabled={busyAction}>
+                      USER
+                    </Button>
+                    <Button variant="secondary" onClick={() => setRoles(u.id, ["MANAGER"])} disabled={busyAction}>
+                      MANAGER
+                    </Button>
+                    <Button variant="secondary" onClick={() => setRoles(u.id, ["CASHIER"])} disabled={busyAction}>
+                      CASHIER
+                    </Button>
+
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setResetUser(u);
+                        setResetOpen(true);
+                      }}
+                      disabled={busyAction}
+                      title="Reset password"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
+
+                    <Button
+                      variant={u.isActive ? "danger" : "secondary"}
+                      onClick={() => toggleActive(u)}
+                      disabled={busyAction}
+                      title={u.isActive ? "Desactivar" : "Reactivar"}
+                    >
+                      <Power className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
+
+            {!loadingList && filtered.length === 0 && (
+              <tr>
+                <td className="px-4 py-6 text-sm text-zinc-500" colSpan={3}>
+                  No hay usuarios para mostrar.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -412,7 +496,11 @@ export default function AdminUsersPage() {
       <Modal
         open={resetOpen}
         title={`Reset password • ${resetUser?.email ?? ""}`}
-        onClose={() => setResetOpen(false)}
+        onClose={() => {
+          setResetOpen(false);
+          setResetUser(null);
+          setResetPass("");
+        }}
       >
         <Input
           type="password"
@@ -421,10 +509,19 @@ export default function AdminUsersPage() {
           onChange={(e) => setResetPass(e.target.value)}
         />
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setResetOpen(false)}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setResetOpen(false);
+              setResetUser(null);
+              setResetPass("");
+            }}
+          >
             Cancelar
           </Button>
-          <Button onClick={submitReset}>Confirmar</Button>
+          <Button onClick={submitReset} disabled={busyAction || !resetPass}>
+            Confirmar
+          </Button>
         </div>
       </Modal>
     </div>

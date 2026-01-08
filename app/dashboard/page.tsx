@@ -13,10 +13,12 @@ function getHomeByRole(user: any) {
   const isAdmin = hasRole(user, "ADMIN");
   const isManager = hasRole(user, "MANAGER");
   const isCashier = hasRole(user, "CASHIER");
+  const isSuperAdmin = hasRole(user, "SUPERADMIN");
 
   if (isAdmin) return "/admin";
   if (isManager) return "/manager";
   if (isCashier) return "/cashier";
+  if (isSuperAdmin) return "/superadmin";
   return "/user";
 }
 

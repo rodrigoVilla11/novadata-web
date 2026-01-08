@@ -39,7 +39,6 @@ type AttendanceRow = {
   id: string;
   dateKey: string;
   employeeId: string;
-  employeeName?: string;
   checkInAt?: string | null;
   checkOutAt?: string | null;
   notes?: string | null;
@@ -65,10 +64,12 @@ function pad(n: number) {
 }
 
 function moneyARS(n: number) {
+  if (!Number.isFinite(n)) return "—";
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS" });
 }
 
 function hoursFmt(h: number) {
+  if (!Number.isFinite(h)) return "—";
   return `${(Math.round(h * 100) / 100).toLocaleString("es-AR")} h`;
 }
 
@@ -94,7 +95,7 @@ function getRangeForPeriod(period: Period, baseDateKey: string) {
 
   if (period === "week") {
     const day = base.getDay();
-    const diffToMonday = (day === 0 ? -6 : 1) - day;
+    const diffToMonday = (day === 0 ? -6 : 1) - day; // Monday=1
     const monday = new Date(base);
     monday.setDate(base.getDate() + diffToMonday);
     const sunday = new Date(monday);
@@ -144,7 +145,15 @@ export default function AdminAttendancesPage() {
   const { getAccessToken } = useAuth();
 
   const [tab, setTab] = useState<"summary" | "day">("summary");
+
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
+  const employeesById = useMemo(() => {
+    const m = new Map<string, EmployeeRow>();
+    for (const e of employees) m.set(e.id, e);
+    return m;
+  }, [employees]);
+
+  // global filters (resumen)
   const [onlyActive, setOnlyActive] = useState(true);
   const [employeeId, setEmployeeId] = useState("");
   const [q, setQ] = useState("");
@@ -155,12 +164,12 @@ export default function AdminAttendancesPage() {
   const [customFrom, setCustomFrom] = useState(todayKeyArgentina());
   const [customTo, setCustomTo] = useState(todayKeyArgentina());
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   // day
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
   const [dayRows, setDayRows] = useState<AttendanceRow[]>([]);
-  const [dayLoading, setDayLoading] = useState(true);
+  const [dayLoading, setDayLoading] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -172,16 +181,23 @@ export default function AdminAttendancesPage() {
 
   const employeeOptions = useMemo(() => {
     const list = onlyActive ? employees.filter((e) => e.isActive) : employees;
-    return list.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    return [...list].sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [employees, onlyActive]);
 
   const filteredItems = useMemo(() => {
     const items = summary?.items ?? [];
     if (!q.trim()) return items;
-    return items.filter((i) =>
-      i.fullName.toLowerCase().includes(q.toLowerCase())
-    );
+    const needle = q.toLowerCase();
+    return items.filter((i) => i.fullName.toLowerCase().includes(needle));
   }, [summary, q]);
+
+  const dayRowsView = useMemo(() => {
+    // agregamos employeeName desde employeesById
+    return dayRows.map((r) => ({
+      ...r,
+      employeeName: employeesById.get(r.employeeId)?.fullName ?? null,
+    }));
+  }, [dayRows, employeesById]);
 
   /* ============================================================================
    * Loaders
@@ -192,11 +208,12 @@ export default function AdminAttendancesPage() {
       getAccessToken,
       "/employees"
     );
-    setEmployees(emps);
+    setEmployees(Array.isArray(emps) ? emps : []);
   }
 
   async function loadSummary() {
     setSummaryLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({
         from: range.from,
@@ -220,12 +237,13 @@ export default function AdminAttendancesPage() {
 
   async function loadDay() {
     setDayLoading(true);
+    setError(null);
     try {
       const data = await apiFetchAuthed<AttendanceRow[]>(
         getAccessToken,
         `/attendance/day/${encodeURIComponent(dateKey)}`
       );
-      setDayRows(data);
+      setDayRows(Array.isArray(data) ? data : []);
     } catch (e: any) {
       setError(e?.message || "Error cargando día");
       setDayRows([]);
@@ -234,13 +252,28 @@ export default function AdminAttendancesPage() {
     }
   }
 
+  async function refreshAll() {
+    setBusy(true);
+    setError(null);
+    try {
+      await loadEmployees();
+      // refrescamos lo visible
+      if (tab === "summary") await loadSummary();
+      if (tab === "day") await loadDay();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // init
   useEffect(() => {
     (async () => {
       setBusy(true);
+      setError(null);
       try {
         await loadEmployees();
-        await loadSummary();
-        await loadDay();
+        // carga inicial de ambos para que al cambiar tab ya haya data
+        await Promise.all([loadSummary(), loadDay()]);
       } finally {
         setBusy(false);
       }
@@ -248,15 +281,19 @@ export default function AdminAttendancesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // auto refresh summary solo si tab summary
   useEffect(() => {
+    if (tab !== "summary") return;
     loadSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range.from, range.to, employeeId, onlyActive]);
+  }, [tab, range.from, range.to, employeeId, onlyActive]);
 
+  // auto refresh day solo si tab day
   useEffect(() => {
+    if (tab !== "day") return;
     loadDay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateKey]);
+  }, [tab, dateKey]);
 
   /* ============================================================================
    * Render
@@ -286,20 +323,7 @@ export default function AdminAttendancesPage() {
           >
             Detalle del día
           </Button>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await loadEmployees();
-                await loadSummary();
-                await loadDay();
-              } finally {
-                setBusy(false);
-              }
-            }}
-            loading={busy}
-          >
+          <Button variant="secondary" onClick={refreshAll} loading={busy}>
             <RefreshCcw className="h-4 w-4" />
           </Button>
         </div>
@@ -317,10 +341,7 @@ export default function AdminAttendancesPage() {
         <CardBody>
           <div className="grid gap-3 md:grid-cols-4">
             <Field label="Empleado">
-              <Select
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-              >
+              <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
                 <option value="">Todos</option>
                 {employeeOptions.map((e) => (
                   <option key={e.id} value={e.id}>
@@ -341,11 +362,7 @@ export default function AdminAttendancesPage() {
             </Field>
 
             <Field label="Buscar (Resumen)">
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar por nombre…"
-              />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nombre…" />
             </Field>
 
             <div className="flex items-end">
@@ -368,10 +385,7 @@ export default function AdminAttendancesPage() {
             <CardBody>
               <div className="grid gap-3 md:grid-cols-5">
                 <Field label="Tipo">
-                  <Select
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value as Period)}
-                  >
+                  <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
                     <option value="day">Día</option>
                     <option value="week">Semana</option>
                     <option value="biweek">Quincena</option>
@@ -382,27 +396,15 @@ export default function AdminAttendancesPage() {
 
                 {period !== "custom" ? (
                   <Field label="Fecha base">
-                    <Input
-                      type="date"
-                      value={baseDate}
-                      onChange={(e) => setBaseDate(e.target.value)}
-                    />
+                    <Input type="date" value={baseDate} onChange={(e) => setBaseDate(e.target.value)} />
                   </Field>
                 ) : (
                   <>
                     <Field label="Desde">
-                      <Input
-                        type="date"
-                        value={customFrom}
-                        onChange={(e) => setCustomFrom(e.target.value)}
-                      />
+                      <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
                     </Field>
                     <Field label="Hasta">
-                      <Input
-                        type="date"
-                        value={customTo}
-                        onChange={(e) => setCustomTo(e.target.value)}
-                      />
+                      <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
                     </Field>
                   </>
                 )}
@@ -411,14 +413,10 @@ export default function AdminAttendancesPage() {
                   <div className="w-full rounded-2xl border border-zinc-200 bg-white p-4">
                     <div className="text-xs text-zinc-500">Total a pagar</div>
                     <div className="mt-1 text-lg font-bold text-zinc-900">
-                      {summaryLoading || !summary
-                        ? "—"
-                        : moneyARS(summary.totals.totalPay)}
+                      {summaryLoading || !summary ? "—" : moneyARS(summary.totals.totalPay)}
                     </div>
                     <div className="mt-1 text-sm text-zinc-600">
-                      {summaryLoading || !summary
-                        ? ""
-                        : `${hoursFmt(summary.totals.totalHours)} totales`}
+                      {summaryLoading || !summary ? "" : `${hoursFmt(summary.totals.totalHours)} totales`}
                     </div>
                   </div>
                 </div>
@@ -449,22 +447,30 @@ export default function AdminAttendancesPage() {
               </thead>
 
               <tbody className="divide-y divide-zinc-100">
+                {summaryLoading && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
+                      Cargando…
+                    </td>
+                  </tr>
+                )}
+
+                {!summaryLoading && filteredItems.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
+                      No hay datos en el rango.
+                    </td>
+                  </tr>
+                )}
+
                 {!summaryLoading &&
                   filteredItems.map((it) => (
                     <tr key={it.employeeId} className="hover:bg-zinc-50">
-                      <td className="px-4 py-3 font-semibold">
-                        {it.fullName}
-                      </td>
-                      <td className="px-4 py-3">
-                        {moneyARS(it.hourlyRate).replace(",00", "")}
-                      </td>
+                      <td className="px-4 py-3 font-semibold">{it.fullName}</td>
+                      <td className="px-4 py-3">{moneyARS(it.hourlyRate).replace(",00", "")}</td>
                       <td className="px-4 py-3">{it.daysWorked}</td>
-                      <td className="px-4 py-3">
-                        {hoursFmt(it.totalHours)}
-                      </td>
-                      <td className="px-4 py-3 font-bold">
-                        {moneyARS(it.totalPay)}
-                      </td>
+                      <td className="px-4 py-3">{hoursFmt(it.totalHours)}</td>
+                      <td className="px-4 py-3 font-bold">{moneyARS(it.totalPay)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -480,11 +486,7 @@ export default function AdminAttendancesPage() {
             <CardHeader title="Detalle por día" />
             <CardBody>
               <Field label="Fecha">
-                <Input
-                  type="date"
-                  value={dateKey}
-                  onChange={(e) => setDateKey(e.target.value)}
-                />
+                <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
               </Field>
             </CardBody>
           </Card>
@@ -509,17 +511,31 @@ export default function AdminAttendancesPage() {
               </thead>
 
               <tbody className="divide-y divide-zinc-100">
+                {dayLoading && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                      Cargando…
+                    </td>
+                  </tr>
+                )}
+
+                {!dayLoading && dayRowsView.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
+                      No hay asistencias para ese día.
+                    </td>
+                  </tr>
+                )}
+
                 {!dayLoading &&
-                  dayRows.map((r) => (
+                  dayRowsView.map((r) => (
                     <tr key={r.id} className="hover:bg-zinc-50">
                       <td className="px-4 py-3 font-semibold">
                         {r.employeeName || r.employeeId}
                       </td>
                       <td className="px-4 py-3">{fmtShort(r.checkInAt)}</td>
                       <td className="px-4 py-3">{fmtShort(r.checkOutAt)}</td>
-                      <td className="px-4 py-3">
-                        {r.notes?.trim() || "—"}
-                      </td>
+                      <td className="px-4 py-3">{r.notes?.trim() || "—"}</td>
                     </tr>
                   ))}
               </tbody>

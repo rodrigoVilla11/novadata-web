@@ -30,17 +30,19 @@ import {
 
 type EmployeeRow = {
   id: string;
+  branchId?: string | null; // ✅ NUEVO (backend multi-branch)
   fullName: string;
-  hireDate: string; // ISO o YYYY-MM-DD
+  hireDate: string; // ISO
   hourlyRate: number;
-  userId?: string | null; // ObjectId
+  userId?: string | null;
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
 
 type UserRow = {
-  id: string; // ObjectId
+  id: string;
+  branchId?: string | null; // ✅ opcional si lo devolvés en /admin/users
   email: string;
   roles: string[];
   isActive: boolean;
@@ -58,7 +60,7 @@ function todayKeyArgentina() {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date()); // YYYY-MM-DD
+  }).format(new Date());
 }
 
 function isObjectId(v?: string | null) {
@@ -134,7 +136,7 @@ export default function AdminEmployeesPage() {
   const [fullName, setFullName] = useState("");
   const [hireDate, setHireDate] = useState(todayKeyArgentina());
   const [hourlyRate, setHourlyRate] = useState<number>(0);
-  const [newUserId, setNewUserId] = useState<string>(""); // optional link on create
+  const [newUserId, setNewUserId] = useState<string>("");
 
   // edit inline
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -142,7 +144,7 @@ export default function AdminEmployeesPage() {
   const [editHireDate, setEditHireDate] = useState("");
   const [editHourlyRate, setEditHourlyRate] = useState<number>(0);
 
-  // link user drafts (employeeId -> selectedUserId)
+  // link drafts (employeeId -> selectedUserId)
   const [linkDraft, setLinkDraft] = useState<Record<string, string>>({});
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -193,15 +195,17 @@ export default function AdminEmployeesPage() {
     setOkMsg(null);
     setLoadingList(true);
     try {
+      // ✅ opcional: pedir solo activos al backend si querés
+      const qs = onlyActive ? "?activeOnly=true" : "";
+
       const [emps, us] = await Promise.all([
-        apiFetchAuthed<EmployeeRow[]>(getAccessToken, "/employees"),
-        apiFetchAuthed<UserRow[]>(getAccessToken, "/admin/users"),
+        apiFetchAuthed<EmployeeRow[]>(getAccessToken, `/employees${qs}`),
+        apiFetchAuthed<UserRow[]>(getAccessToken, "/users"),
       ]);
 
-      setItems(emps);
-      setUsers(us);
+      setItems(Array.isArray(emps) ? emps : []);
+      setUsers(Array.isArray(us) ? us : []);
 
-      // inicializar drafts con lo que viene del server (si no existía)
       setLinkDraft((prev) => {
         const next = { ...prev };
         for (const e of emps) {
@@ -210,7 +214,8 @@ export default function AdminEmployeesPage() {
         return next;
       });
 
-      flashOk("Datos actualizados ✔");
+      // ✅ si querés, no flashes en el primer load (a gusto)
+      // flashOk("Datos actualizados ✔");
     } catch (e: any) {
       setError(e?.message || "Error cargando empleados/usuarios");
     } finally {
@@ -221,7 +226,7 @@ export default function AdminEmployeesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onlyActive]); // ✅ recarga si cambiás filtro server-side
 
   async function createEmployee() {
     if (!fullName.trim() || !hireDate.trim()) return;
@@ -239,7 +244,7 @@ export default function AdminEmployeesPage() {
         method: "POST",
         body: JSON.stringify({
           fullName: fullName.trim(),
-          hireDate, // YYYY-MM-DD
+          hireDate,
           hourlyRate: Number(hourlyRate),
           userId: newUserId ? newUserId : null,
         }),
@@ -362,7 +367,6 @@ export default function AdminEmployeesPage() {
         body: JSON.stringify({ userId: null }),
       });
 
-      // optimista
       setLinkDraft((p) => ({ ...p, [employeeId]: "" }));
 
       flashOk("Usuario desvinculado ✔");
@@ -473,9 +477,8 @@ export default function AdminEmployeesPage() {
           </div>
         </div>
 
-        {/* Create employee (collapsible) */}
+        {/* Create employee */}
         <Card>
-          {/* Header */}
           <button
             type="button"
             onClick={() => setCreateOpen((v) => !v)}
@@ -491,8 +494,6 @@ export default function AdminEmployeesPage() {
                 <div className="text-base font-semibold text-zinc-900">
                   Crear empleado
                 </div>
-
-                {/* Badge estado */}
                 <span
                   className={cn(
                     "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
@@ -510,7 +511,6 @@ export default function AdminEmployeesPage() {
               </div>
             </div>
 
-            {/* Toggle button (visual) */}
             <div
               className={cn(
                 "shrink-0",
@@ -533,7 +533,6 @@ export default function AdminEmployeesPage() {
             </div>
           </button>
 
-          {/* Body */}
           <div
             className={cn(
               "overflow-hidden transition-[max-height,opacity] duration-300 ease-out",
@@ -541,7 +540,6 @@ export default function AdminEmployeesPage() {
             )}
           >
             <CardBody>
-              {/* Tip superior */}
               <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
                 <div className="flex items-start gap-2">
                   <Info className="mt-0.5 h-4 w-4 text-zinc-400" />
@@ -552,9 +550,7 @@ export default function AdminEmployeesPage() {
                 </div>
               </div>
 
-              {/* Grid más “respirable” */}
               <div className="grid gap-4 md:grid-cols-12">
-                {/* Nombre */}
                 <div className="md:col-span-5">
                   <Field label="Nombre">
                     <div className="relative">
@@ -566,15 +562,9 @@ export default function AdminEmployeesPage() {
                         className="pl-9"
                       />
                     </div>
-                    {!fullName.trim() && (
-                      <div className="mt-1 text-xs text-zinc-500">
-                        Requerido para crear el empleado.
-                      </div>
-                    )}
                   </Field>
                 </div>
 
-                {/* Fecha ingreso */}
                 <div className="md:col-span-3">
                   <Field label="Fecha ingreso">
                     <div className="relative">
@@ -586,15 +576,9 @@ export default function AdminEmployeesPage() {
                         className="pl-9"
                       />
                     </div>
-                    {!hireDate.trim() && (
-                      <div className="mt-1 text-xs text-zinc-500">
-                        Requerida.
-                      </div>
-                    )}
                   </Field>
                 </div>
 
-                {/* Pago por hora */}
                 <div className="md:col-span-2">
                   <Field label="Pago por hora">
                     <div className="relative">
@@ -603,7 +587,6 @@ export default function AdminEmployeesPage() {
                         type="number"
                         value={String(hourlyRate)}
                         onChange={(e) => setHourlyRate(Number(e.target.value))}
-                        placeholder="Ej: 3500"
                         className="pl-9"
                         inputMode="numeric"
                         min={0}
@@ -618,7 +601,6 @@ export default function AdminEmployeesPage() {
                   </Field>
                 </div>
 
-                {/* CTA */}
                 <div className="md:col-span-2 flex items-end">
                   <Button
                     className="w-full"
@@ -633,12 +615,12 @@ export default function AdminEmployeesPage() {
                   </Button>
                 </div>
 
-                {/* Usuario (opcional) en fila 2 para que respire */}
                 <div className="md:col-span-6">
                   <Field label="Usuario (opcional)">
                     <Select
                       value={newUserId}
                       onChange={(e) => setNewUserId(e.target.value)}
+                      disabled={busy}
                     >
                       <option value="">— Sin usuario —</option>
                       {users.map((u) => (
@@ -647,46 +629,7 @@ export default function AdminEmployeesPage() {
                         </option>
                       ))}
                     </Select>
-                    <div className="mt-1 text-xs text-zinc-500">
-                      Si lo vinculás, el empleado queda conectado al usuario
-                      para permisos/reportes.
-                    </div>
                   </Field>
-                </div>
-
-                {/* Mini resumen a la derecha */}
-                <div className="md:col-span-6">
-                  <div className="h-full rounded-2xl border border-zinc-200 bg-white p-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                      Resumen
-                    </div>
-                    <div className="mt-2 grid gap-2 text-sm">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-zinc-500">Nombre</span>
-                        <span className="font-semibold text-zinc-900">
-                          {fullName.trim() || "—"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-zinc-500">Ingreso</span>
-                        <span className="font-semibold text-zinc-900">
-                          {hireDate.trim() || "—"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-zinc-500">Hora</span>
-                        <span className="font-semibold text-zinc-900">
-                          {money(hourlyRate)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-zinc-500">Usuario</span>
-                        <span className="font-semibold text-zinc-900">
-                          {newUserId ? "Vinculado" : "No"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
             </CardBody>
@@ -758,14 +701,11 @@ export default function AdminEmployeesPage() {
 
                     return (
                       <tr key={e.id} className="hover:bg-zinc-50/60">
-                        {/* Empleado */}
                         <td className="px-4 py-3">
                           {isEditing ? (
                             <Input
                               value={editFullName}
-                              onChange={(ev) =>
-                                setEditFullName(ev.target.value)
-                              }
+                              onChange={(ev) => setEditFullName(ev.target.value)}
                             />
                           ) : (
                             <div>
@@ -786,15 +726,12 @@ export default function AdminEmployeesPage() {
                           )}
                         </td>
 
-                        {/* Ingreso */}
                         <td className="px-4 py-3">
                           {isEditing ? (
                             <Input
                               type="date"
                               value={editHireDate}
-                              onChange={(ev) =>
-                                setEditHireDate(ev.target.value)
-                              }
+                              onChange={(ev) => setEditHireDate(ev.target.value)}
                             />
                           ) : (
                             <div className="text-sm text-zinc-700">
@@ -803,7 +740,6 @@ export default function AdminEmployeesPage() {
                           )}
                         </td>
 
-                        {/* hourly */}
                         <td className="px-4 py-3">
                           {isEditing ? (
                             <Input
@@ -821,7 +757,6 @@ export default function AdminEmployeesPage() {
                           )}
                         </td>
 
-                        {/* Usuario link */}
                         <td className="px-4 py-3">
                           <div className="grid gap-2">
                             <Select
@@ -885,12 +820,10 @@ export default function AdminEmployeesPage() {
                           </div>
                         </td>
 
-                        {/* Estado */}
                         <td className="px-4 py-3">
                           <StatusPill active={e.isActive} />
                         </td>
 
-                        {/* Acciones */}
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-2">
                             {!isEditing ? (
@@ -957,8 +890,8 @@ export default function AdminEmployeesPage() {
         </div>
 
         <div className="text-xs text-zinc-500">
-          Tip: si querés evitar el mismo usuario asignado a 2 empleados, lo
-          validamos en backend (índice unique parcial sobre userId).
+          Tip: ya estás protegido en backend para que no se pueda asignar un user
+          de otra sucursal.
         </div>
       </div>
     </AdminProtected>
