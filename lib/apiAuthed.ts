@@ -1,16 +1,13 @@
 import { apiFetch } from "./api";
-
-type GetToken = () => Promise<string | null>;
+type GetAccessToken = () => Promise<string | null>;
+type RefreshAccessToken = () => Promise<string | null>;
 
 export async function apiFetchAuthed<T>(
-  getToken: GetToken,
+  getAccessToken: GetAccessToken,
+  refreshAccessToken: RefreshAccessToken,
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = await getToken();
-  console.log("apiFetchAuthed -> token?", !!token);
-  // Si no hay token, igual intentamos (puede ser endpoint público),
-  // pero para admin/users te conviene fallar.
   const doFetch = (t?: string | null) =>
     apiFetch<T>(path, {
       ...options,
@@ -20,19 +17,15 @@ export async function apiFetchAuthed<T>(
       },
     });
 
+  const token = await getAccessToken();
+
   try {
     return await doFetch(token);
   } catch (e: any) {
-    // Si expiró el access token, apiFetch devuelve Error(msg).
-    // Como no tenemos status, detectamos por mensaje típico.
-    const msg = String(e?.message || "");
-    const looks401 =
-      msg.includes("401") || msg.toLowerCase().includes("unauthorized");
+    if (e?.name !== "ApiError" || e.status !== 401) throw e;
 
-    if (!looks401) throw e;
-
-    // Reintentar con token renovado:
-    const newToken = await getToken(); // AuthProvider refresh lock evita duplicados
+    // ✅ refresh real por cookie httpOnly
+    const newToken = await refreshAccessToken();
     if (!newToken) throw e;
 
     return await doFetch(newToken);

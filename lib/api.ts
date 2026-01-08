@@ -7,11 +7,24 @@ function safeJsonParse(text: string) {
     return null;
   }
 }
+export class ApiError extends Error {
+  status: number;
+  data: any;
+  method: string;
+  path: string;
+
+  constructor(args: { status: number; data: any; method: string; path: string; message: string }) {
+    super(args.message);
+    this.name = "ApiError";
+    this.status = args.status;
+    this.data = args.data;
+    this.method = args.method;
+    this.path = args.path;
+  }
+}
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method || "GET").toUpperCase();
-
-  // ⚠️ No fuerces Content-Type en GET/HEAD (y menos si no hay body)
   const hasBody = options.body != null;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -24,23 +37,24 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     credentials: "include",
   });
 
-  const text = await res.text(); // leer UNA sola vez
+  const text = await res.text();
+  const data = text.trim() ? safeJsonParse(text) ?? text : null;
 
   if (!res.ok) {
-    const maybeJson = safeJsonParse(text);
     const msg =
-      maybeJson?.message ||
-      maybeJson?.error ||
-      (typeof maybeJson === "string" ? maybeJson : null) ||
-      text ||
+      (data && typeof data === "object" && (data.message || data.error)) ||
+      (typeof data === "string" ? data : null) ||
       `HTTP ${res.status} ${res.statusText}`;
 
-    throw new Error(`[${method} ${path}] ${res.status} ${res.statusText} :: ${msg}`);
+    throw new ApiError({
+      status: res.status,
+      data,
+      method,
+      path,
+      message: `[${method} ${path}] ${msg}`,
+    });
   }
 
-  // 204 / body vacío
   if (res.status === 204 || !text.trim()) return undefined as T;
-
-  const data = safeJsonParse(text);
-  return (data ?? (text as any)) as T;
+  return data as T;
 }

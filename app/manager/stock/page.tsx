@@ -211,7 +211,7 @@ function MovementsModal({
   if (!open || !ingredient) return null;
 
   return (
-    <div className="fixed inset-0 z-[75]">
+    <div className="fixed inset-0 z-75">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-1/2 top-10 w-[min(980px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
@@ -423,7 +423,7 @@ function ManualMoveModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[80]">
+    <div className="fixed inset-0 z-80">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-1/2 top-10 w-[min(900px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
@@ -619,7 +619,7 @@ function PurchaseOrderDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70]">
+    <div className="fixed inset-0 z-70">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
