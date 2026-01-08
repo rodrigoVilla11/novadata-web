@@ -25,11 +25,13 @@ import {
 } from "lucide-react";
 
 /* ============================================================================
- * Types (alineado a tu schema)
+ * Types (alineado a tu schema + branch requerido)
  * ========================================================================== */
 
 type Unit = "UNIT" | "KG" | "L";
 type Currency = "ARS" | "USD";
+
+type Branch = { id: string; name: string; isActive: boolean };
 
 type Supplier = { id: string; name: string; isActive: boolean };
 
@@ -74,7 +76,8 @@ type Product = {
   name: string;
   description: string | null;
 
-  branchId?: string | null;
+  branchId: string; // ✅ requerido
+
   supplierId?: string | null;
 
   categoryId: string | null;
@@ -224,6 +227,7 @@ function Notice({
 export default function AdminProductsPage() {
   const { getAccessToken } = useAuth();
 
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -237,6 +241,7 @@ export default function AdminProductsPage() {
   const [ok, setOk] = useState<string | null>(null);
 
   // filters
+  const [branchIdFilter, setBranchIdFilter] = useState("");
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
   const [sellableOnly, setSellableOnly] = useState(false);
@@ -285,6 +290,7 @@ export default function AdminProductsPage() {
   const [selected, setSelected] = useState<Product | null>(null);
 
   // edit drafts
+  const [editBranchId, setEditBranchId] = useState("");
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editCategoryId, setEditCategoryId] = useState<string>("");
@@ -314,6 +320,11 @@ export default function AdminProductsPage() {
   const [editAddQty, setEditAddQty] = useState<string>("1");
   const [editAddNote, setEditAddNote] = useState<string>("");
   const [editAddSearch, setEditAddSearch] = useState<string>("");
+
+  const activeBranches = useMemo(
+    () => (branches || []).filter((b) => b.isActive !== false),
+    [branches]
+  );
 
   const activeCategories = useMemo(
     () =>
@@ -352,8 +363,11 @@ export default function AdminProductsPage() {
         id: `I:${i.id}`,
         kind: "INGREDIENT" as const,
         refId: i.id,
-        label: `${i.name} · ${unitLabel(i.unit)}${sup ? ` · ${sup}` : ""}`,
-        search: `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
+        label: `${i.name} · ${unitLabel(i.unit)}${
+          sup ? ` · ${sup}` : ""
+        }`,
+        search:
+          `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
       };
     });
 
@@ -383,8 +397,11 @@ export default function AdminProductsPage() {
         id: `I:${i.id}`,
         kind: "INGREDIENT" as const,
         refId: i.id,
-        label: `${i.name} · ${unitLabel(i.unit)}${sup ? ` · ${sup}` : ""}`,
-        search: `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
+        label: `${i.name} · ${unitLabel(i.unit)}${
+          sup ? ` · ${sup}` : ""
+        }`,
+        search:
+          `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
       };
     });
 
@@ -436,12 +453,42 @@ export default function AdminProductsPage() {
     setLoading(true);
 
     try {
-      const [cats, sups, ings, preps, prods] = await Promise.all([
-        apiFetchAuthed<Category[]>(getAccessToken, "/categories?onlyActive=false"),
-        apiFetchAuthed<Supplier[]>(getAccessToken, "/suppliers"),
-        apiFetchAuthed<Ingredient[]>(getAccessToken, "/ingredients"),
-        apiFetchAuthed<Preparation[]>(getAccessToken, "/preparations"),
-        apiFetchAuthed<Product[]>(getAccessToken, "/products"),
+      // branches primero (para elegir default)
+      const brs = await apiFetchAuthed<Branch[]>(getAccessToken, "/branches");
+      setBranches(brs);
+
+      let chosenBranchId = branchIdFilter;
+      if (!chosenBranchId) {
+        const first = brs.find((b) => b.isActive !== false) || brs[0];
+        chosenBranchId = first?.id || "";
+        if (chosenBranchId) setBranchIdFilter(chosenBranchId);
+      }
+
+      const branchQs = chosenBranchId
+        ? `?branchId=${encodeURIComponent(chosenBranchId)}`
+        : "";
+
+      const [
+        cats,
+        sups,
+        ings,
+        preps,
+        prods,
+      ] = await Promise.all([
+        // si tu backend no soporta branchId acá, lo va a ignorar
+        apiFetchAuthed<Category[]>(
+          getAccessToken,
+          `/categories?onlyActive=false${
+            chosenBranchId ? `&branchId=${encodeURIComponent(chosenBranchId)}` : ""
+          }`
+        ),
+        apiFetchAuthed<Supplier[]>(getAccessToken, `/suppliers${branchQs}`),
+        apiFetchAuthed<Ingredient[]>(getAccessToken, `/ingredients${branchQs}`),
+        apiFetchAuthed<Preparation[]>(
+          getAccessToken,
+          `/preparations${branchQs}`
+        ),
+        apiFetchAuthed<Product[]>(getAccessToken, `/products${branchQs}`),
       ]);
 
       setCategories(cats);
@@ -468,6 +515,13 @@ export default function AdminProductsPage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // recargar cuando cambie branch
+  useEffect(() => {
+    if (!branchIdFilter) return;
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchIdFilter]);
 
   /* ============================================================================
    * Create actions
@@ -501,8 +555,18 @@ export default function AdminProductsPage() {
     setItemsDraft((prev) => [
       ...prev,
       type === "INGREDIENT"
-        ? { type: "INGREDIENT", ingredientId: refId, qty: String(qty), note: addNote || "" }
-        : { type: "PREPARATION", preparationId: refId, qty: String(qty), note: addNote || "" },
+        ? {
+            type: "INGREDIENT",
+            ingredientId: refId,
+            qty: String(qty),
+            note: addNote || "",
+          }
+        : {
+            type: "PREPARATION",
+            preparationId: refId,
+            qty: String(qty),
+            note: addNote || "",
+          },
     ]);
 
     setAddPickId("");
@@ -524,12 +588,18 @@ export default function AdminProductsPage() {
   async function create() {
     if (!name.trim()) return;
 
+    if (!branchIdFilter) {
+      setErr("Seleccioná una sucursal (branch) antes de crear el producto.");
+      return;
+    }
+
     if (!itemsDraft.length) {
       setErr("Agregá al menos 1 item (ingrediente o preparación).");
       return;
     }
 
     const payload = {
+      branchId: branchIdFilter, // ✅ requerido
       name: name.trim(),
       description: description.trim() || null,
       categoryId: categoryId || null,
@@ -639,7 +709,6 @@ export default function AdminProductsPage() {
       });
       await loadAll();
 
-      // si está abierto el drawer, refrescamos selected también
       if (selected?.id === p.id) {
         setSelected((prev) => (prev ? { ...prev, isActive: next } : prev));
       }
@@ -669,7 +738,7 @@ export default function AdminProductsPage() {
   }
 
   /* ============================================================================
-   * Details / Edit actions (alineado a controller: GET/:id y PATCH/:id)
+   * Details / Edit actions (GET/:id y PATCH/:id)
    * ========================================================================== */
 
   async function openDetails(p: Product) {
@@ -678,11 +747,14 @@ export default function AdminProductsPage() {
     setBusy(true);
 
     try {
-      // traemos el producto fresco (por si la lista no tiene computed / items completos)
-      const full = await apiFetchAuthed<Product>(getAccessToken, `/products/${p.id}`);
+      const full = await apiFetchAuthed<Product>(
+        getAccessToken,
+        `/products/${p.id}`
+      );
 
       setSelected(full);
 
+      setEditBranchId(full.branchId ?? branchIdFilter ?? "");
       setEditName(full.name ?? "");
       setEditDescription(full.description ?? "");
       setEditCategoryId(full.categoryId ?? "");
@@ -778,8 +850,18 @@ export default function AdminProductsPage() {
     setEditItemsDraft((prev) => [
       ...prev,
       type === "INGREDIENT"
-        ? { type: "INGREDIENT", ingredientId: refId, qty: String(qty), note: editAddNote || "" }
-        : { type: "PREPARATION", preparationId: refId, qty: String(qty), note: editAddNote || "" },
+        ? {
+            type: "INGREDIENT",
+            ingredientId: refId,
+            qty: String(qty),
+            note: editAddNote || "",
+          }
+        : {
+            type: "PREPARATION",
+            preparationId: refId,
+            qty: String(qty),
+            note: editAddNote || "",
+          },
     ]);
 
     setEditAddPickId("");
@@ -794,24 +876,27 @@ export default function AdminProductsPage() {
       setErr("Nombre requerido");
       return;
     }
+
+    if (!editBranchId) {
+      setErr("Branch requerido");
+      return;
+    }
+
     if (!editItemsDraft.length) {
       setErr("Agregá al menos 1 item.");
       return;
     }
 
     const payload = {
+      branchId: editBranchId, // ✅ requerido
       name: editName.trim(),
       description: editDescription.trim() || null,
       categoryId: editCategoryId || null,
-      // si querés mantener categoryName desde backend, NO lo mandamos
       sku: editSku.trim() || null,
       barcode: editBarcode.trim() || null,
 
       tags: parseTags(editTagsRaw),
       imageUrl: editImageUrl.trim() || null,
-
-      // dejamos galleryUrls como está si tu update lo soporta; si no, no lo mandes
-      // galleryUrls: selected.galleryUrls ?? [],
 
       isSellable: editIsSellable,
       isProduced: editIsProduced,
@@ -825,7 +910,8 @@ export default function AdminProductsPage() {
 
       currency: editCurrency,
 
-      salePrice: editSalePrice.trim() === "" ? null : Math.max(0, toNum(editSalePrice)),
+      salePrice:
+        editSalePrice.trim() === "" ? null : Math.max(0, toNum(editSalePrice)),
       marginPct:
         editMarginPct.trim() === ""
           ? null
@@ -856,9 +942,11 @@ export default function AdminProductsPage() {
 
       await loadAll();
 
-      // recargamos detalle para ver computed actualizado si tu backend recalcula en update
       try {
-        const refreshed = await apiFetchAuthed<Product>(getAccessToken, `/products/${selected.id}`);
+        const refreshed = await apiFetchAuthed<Product>(
+          getAccessToken,
+          `/products/${selected.id}`
+        );
         setSelected(refreshed);
       } catch {}
 
@@ -909,8 +997,7 @@ export default function AdminProductsPage() {
         ? null
         : Math.max(0, Math.min(1, toNum(marginPct)));
 
-    const suggestedPrice =
-      sp != null ? null : m != null ? unitCost * (1 + m) : null;
+    const suggestedPrice = sp != null ? null : m != null ? unitCost * (1 + m) : null;
 
     return { ingredientsCost, totalCost, unitCost, suggestedPrice };
   }, [
@@ -962,7 +1049,27 @@ export default function AdminProductsPage() {
 
         {/* Filters */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <div className="grid gap-3 lg:grid-cols-[260px_1fr_auto_auto_auto] lg:items-center">
+          <div className="grid gap-3 lg:grid-cols-[260px_260px_1fr_auto_auto_auto] lg:items-center">
+            {/* Branch */}
+            <div className="relative">
+              <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <Select
+                value={branchIdFilter}
+                onChange={(e) => setBranchIdFilter(e.target.value)}
+                className="pl-9"
+              >
+                {activeBranches.length === 0 && (
+                  <option value="">Sin sucursales</option>
+                )}
+                {activeBranches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            {/* Category */}
             <div className="relative">
               <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Select
@@ -979,6 +1086,7 @@ export default function AdminProductsPage() {
               </Select>
             </div>
 
+            {/* Search */}
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Input
@@ -1036,6 +1144,16 @@ export default function AdminProductsPage() {
           <div className="flex items-start justify-between px-5 pt-2">
             <div className="text-sm text-zinc-500">
               Tip: podés mezclar <b>Ingredientes</b> y <b>Preparaciones</b>.
+              {branchIdFilter ? (
+                <>
+                  {" "}
+                  · Sucursal actual:{" "}
+                  <b>
+                    {activeBranches.find((b) => b.id === branchIdFilter)?.name ??
+                      "—"}
+                  </b>
+                </>
+              ) : null}
             </div>
             <button
               onClick={() => setCreateOpen((v) => !v)}
@@ -1053,7 +1171,10 @@ export default function AdminProductsPage() {
                 </Field>
 
                 <Field label="Categoría">
-                  <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                  <Select
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                  >
                     <option value="">(Sin categoría)</option>
                     {activeCategories.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -1064,7 +1185,11 @@ export default function AdminProductsPage() {
                 </Field>
 
                 <Field label="SKU">
-                  <Input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="Opcional" />
+                  <Input
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                    placeholder="Opcional"
+                  />
                 </Field>
 
                 <Field label="Barcode">
@@ -1111,7 +1236,10 @@ export default function AdminProductsPage() {
                 </Field>
 
                 <Field label="Yield Unit">
-                  <Select value={yieldUnit} onChange={(e) => setYieldUnit(e.target.value as Unit)}>
+                  <Select
+                    value={yieldUnit}
+                    onChange={(e) => setYieldUnit(e.target.value as Unit)}
+                  >
                     <option value="UNIT">Unidad</option>
                     <option value="KG">Kg</option>
                     <option value="L">Litros</option>
@@ -1146,7 +1274,10 @@ export default function AdminProductsPage() {
                 </Field>
 
                 <Field label="Moneda">
-                  <Select value={currency} onChange={(e) => setCurrency(e.target.value as any)}>
+                  <Select
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value as any)}
+                  >
                     <option value="ARS">ARS</option>
                     <option value="USD">USD</option>
                   </Select>
@@ -1210,7 +1341,15 @@ export default function AdminProductsPage() {
                 </div>
 
                 <div className="md:col-span-2 flex items-end justify-end">
-                  <Button onClick={create} disabled={busy || !name.trim() || itemsDraft.length === 0}>
+                  <Button
+                    onClick={create}
+                    disabled={
+                      busy ||
+                      !name.trim() ||
+                      itemsDraft.length === 0 ||
+                      !branchIdFilter
+                    }
+                  >
                     <Plus className="h-4 w-4" />
                     Crear producto
                   </Button>
@@ -1248,7 +1387,10 @@ export default function AdminProductsPage() {
                   </Field>
 
                   <Field label="Item">
-                    <Select value={addPickId} onChange={(e) => setAddPickId(e.target.value)}>
+                    <Select
+                      value={addPickId}
+                      onChange={(e) => setAddPickId(e.target.value)}
+                    >
                       <option value="">Seleccionar…</option>
                       {addOptions.map((o) => (
                         <option key={o.id} value={o.id}>
@@ -1261,7 +1403,9 @@ export default function AdminProductsPage() {
                   <Field label="Cantidad">
                     <Input
                       value={addQty}
-                      onChange={(e) => isValidNumberDraft(e.target.value) && setAddQty(e.target.value)}
+                      onChange={(e) =>
+                        isValidNumberDraft(e.target.value) && setAddQty(e.target.value)
+                      }
                     />
                   </Field>
 
@@ -1274,7 +1418,11 @@ export default function AdminProductsPage() {
                   </Field>
 
                   <div className="flex items-end">
-                    <Button variant="secondary" onClick={addItem} disabled={!addPickId}>
+                    <Button
+                      variant="secondary"
+                      onClick={addItem}
+                      disabled={!addPickId}
+                    >
                       <Plus className="h-4 w-4" />
                       Agregar
                     </Button>
@@ -1286,11 +1434,21 @@ export default function AdminProductsPage() {
                   <table className="min-w-full">
                     <thead className="bg-zinc-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Tipo</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Item</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Qty</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Nota</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Acción</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                          Tipo
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                          Item
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                          Qty
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                          Nota
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                          Acción
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
@@ -1305,8 +1463,10 @@ export default function AdminProductsPage() {
                       {itemsDraft.map((it, idx) => {
                         const label =
                           it.type === "INGREDIENT"
-                            ? activeIngredients.find((x) => x.id === it.ingredientId)?.name || "—"
-                            : activePreparations.find((x) => x.id === it.preparationId)?.name || "—";
+                            ? activeIngredients.find((x) => x.id === it.ingredientId)?.name ||
+                              "—"
+                            : activePreparations.find((x) => x.id === it.preparationId)?.name ||
+                              "—";
 
                         return (
                           <tr key={idx} className="hover:bg-zinc-50">
@@ -1338,7 +1498,9 @@ export default function AdminProductsPage() {
                 <div className="mt-4 grid gap-2 text-sm">
                   {preview ? (
                     <div className="grid gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                      <div className="font-semibold text-zinc-900">Preview costos (cliente)</div>
+                      <div className="font-semibold text-zinc-900">
+                        Preview costos (cliente)
+                      </div>
                       <div className="text-zinc-700">
                         Ingredients cost: <b>{money(preview.ingredientsCost, currency)}</b>
                       </div>
@@ -1346,17 +1508,22 @@ export default function AdminProductsPage() {
                         Total cost: <b>{money(preview.totalCost, currency)}</b>
                       </div>
                       <div className="text-zinc-700">
-                        Unit cost: <b>{money(preview.unitCost, currency)}</b> / {unitLabel(yieldUnit)}
+                        Unit cost: <b>{money(preview.unitCost, currency)}</b> /{" "}
+                        {unitLabel(yieldUnit)}
                       </div>
                       <div className="text-zinc-700">
                         Precio sugerido:{" "}
                         <b>
-                          {preview.suggestedPrice == null ? "—" : money(preview.suggestedPrice, currency)}
+                          {preview.suggestedPrice == null
+                            ? "—"
+                            : money(preview.suggestedPrice, currency)}
                         </b>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-xs text-zinc-500">Agregá items para ver preview.</div>
+                    <div className="text-xs text-zinc-500">
+                      Agregá items para ver preview.
+                    </div>
                   )}
                 </div>
               </div>
@@ -1369,12 +1536,24 @@ export default function AdminProductsPage() {
           <table className="min-w-full">
             <thead className="bg-zinc-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Producto</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Categoría</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Costo unit</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Precio</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Estado</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Acciones</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Producto
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Categoría
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Costo unit
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Precio
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Estado
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Acciones
+                </th>
               </tr>
             </thead>
 
@@ -1382,7 +1561,9 @@ export default function AdminProductsPage() {
               {filteredProducts.map((p) => {
                 const catLabel =
                   p.categoryName ||
-                  (p.categoryId ? activeCategories.find((c) => c.id === p.categoryId)?.name : null) ||
+                  (p.categoryId
+                    ? activeCategories.find((c) => c.id === p.categoryId)?.name
+                    : null) ||
                   "—";
 
                 const ccy = (p.currency || "ARS") as Currency;
@@ -1435,7 +1616,9 @@ export default function AdminProductsPage() {
                             </span>
                           ))}
                           {p.tags.length > 4 && (
-                            <span className="text-xs text-zinc-400">+{p.tags.length - 4}</span>
+                            <span className="text-xs text-zinc-400">
+                              +{p.tags.length - 4}
+                            </span>
                           )}
                         </div>
                       ) : null}
@@ -1445,7 +1628,9 @@ export default function AdminProductsPage() {
 
                     <td className="px-4 py-3 text-sm">
                       <div className="font-semibold">{money(unitCost, ccy)}</div>
-                      <div className="text-xs text-zinc-500">Total: {money(totalCost, ccy)}</div>
+                      <div className="text-xs text-zinc-500">
+                        Total: {money(totalCost, ccy)}
+                      </div>
                     </td>
 
                     <td className="px-4 py-3 text-sm">
@@ -1468,7 +1653,11 @@ export default function AdminProductsPage() {
                           Detalles
                         </Button>
 
-                        <Button variant="secondary" onClick={() => recompute(p)} disabled={busy}>
+                        <Button
+                          variant="secondary"
+                          onClick={() => recompute(p)}
+                          disabled={busy}
+                        >
                           <RotateCcw className="h-4 w-4" />
                           Recompute
                         </Button>
@@ -1507,7 +1696,8 @@ export default function AdminProductsPage() {
         </div>
 
         <div className="text-xs text-zinc-500">
-          Mostrando <b>{filteredProducts.length}</b> de <b>{products.length}</b> productos.
+          Mostrando <b>{filteredProducts.length}</b> de <b>{products.length}</b>{" "}
+          productos.
         </div>
 
         {/* Details Drawer */}
@@ -1525,14 +1715,20 @@ export default function AdminProductsPage() {
               <div className="flex items-start justify-between gap-3 p-5 border-b">
                 <div>
                   <div className="text-xs text-zinc-500">Detalles de producto</div>
-                  <div className="text-lg font-semibold text-zinc-900">{selected.name}</div>
+                  <div className="text-lg font-semibold text-zinc-900">
+                    {selected.name}
+                  </div>
                   <div className="mt-1 text-xs text-zinc-500">
                     ID: <span className="font-mono">{selected.id}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" onClick={() => recompute(selected)} disabled={busy}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => recompute(selected)}
+                    disabled={busy}
+                  >
                     <RotateCcw className="h-4 w-4" />
                     Recompute
                   </Button>
@@ -1555,6 +1751,19 @@ export default function AdminProductsPage() {
               <div className="h-[calc(100%-72px)] overflow-auto p-5 space-y-6">
                 {/* basic */}
                 <div className="grid gap-4 md:grid-cols-6">
+                  <Field label="Sucursal (Branch)">
+                    <Select
+                      value={editBranchId}
+                      onChange={(e) => setEditBranchId(e.target.value)}
+                    >
+                      {activeBranches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+
                   <Field label="Nombre">
                     <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
                   </Field>
@@ -1578,7 +1787,10 @@ export default function AdminProductsPage() {
                   </Field>
 
                   <Field label="Barcode">
-                    <Input value={editBarcode} onChange={(e) => setEditBarcode(e.target.value)} />
+                    <Input
+                      value={editBarcode}
+                      onChange={(e) => setEditBarcode(e.target.value)}
+                    />
                   </Field>
 
                   <Field label="Tags">
@@ -1649,7 +1861,8 @@ export default function AdminProductsPage() {
                     <Input
                       value={editPackagingCost}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setEditPackagingCost(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setEditPackagingCost(e.target.value)
                       }
                     />
                   </Field>
@@ -1760,7 +1973,11 @@ export default function AdminProductsPage() {
                     </Field>
 
                     <div className="flex items-end">
-                      <Button variant="secondary" onClick={editAddItem} disabled={!editAddPickId}>
+                      <Button
+                        variant="secondary"
+                        onClick={editAddItem}
+                        disabled={!editAddPickId}
+                      >
                         <Plus className="h-4 w-4" />
                         Agregar
                       </Button>
@@ -1771,11 +1988,21 @@ export default function AdminProductsPage() {
                     <table className="min-w-full">
                       <thead className="bg-zinc-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Tipo</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Item</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Qty</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Nota</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">Acción</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                            Tipo
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                            Item
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                            Qty
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                            Nota
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                            Acción
+                          </th>
                         </tr>
                       </thead>
 
@@ -1783,8 +2010,10 @@ export default function AdminProductsPage() {
                         {editItemsDraft.map((it, idx) => {
                           const label =
                             it.type === "INGREDIENT"
-                              ? activeIngredients.find((x) => x.id === it.ingredientId)?.name || "—"
-                              : activePreparations.find((x) => x.id === it.preparationId)?.name || "—";
+                              ? activeIngredients.find((x) => x.id === it.ingredientId)?.name ||
+                                "—"
+                              : activePreparations.find((x) => x.id === it.preparationId)?.name ||
+                                "—";
 
                           return (
                             <tr key={idx} className="hover:bg-zinc-50">
@@ -1831,16 +2060,31 @@ export default function AdminProductsPage() {
                   <div className="mt-2 grid gap-1 text-zinc-700">
                     <div>
                       Ingredients cost:{" "}
-                      <b>{money(Number(selected.computed?.ingredientsCost ?? 0) || 0, selected.currency || "ARS")}</b>
+                      <b>
+                        {money(
+                          Number(selected.computed?.ingredientsCost ?? 0) || 0,
+                          selected.currency || "ARS"
+                        )}
+                      </b>
                     </div>
                     <div>
                       Total cost:{" "}
-                      <b>{money(Number(selected.computed?.totalCost ?? 0) || 0, selected.currency || "ARS")}</b>
+                      <b>
+                        {money(
+                          Number(selected.computed?.totalCost ?? 0) || 0,
+                          selected.currency || "ARS"
+                        )}
+                      </b>
                     </div>
                     <div>
                       Unit cost:{" "}
-                      <b>{money(Number(selected.computed?.unitCost ?? 0) || 0, selected.currency || "ARS")}</b>
-                      {" "} / {unitLabel(selected.yieldUnit)}
+                      <b>
+                        {money(
+                          Number(selected.computed?.unitCost ?? 0) || 0,
+                          selected.currency || "ARS"
+                        )}
+                      </b>{" "}
+                      / {unitLabel(selected.yieldUnit)}
                     </div>
                     <div>
                       Suggested:{" "}
@@ -1852,11 +2096,19 @@ export default function AdminProductsPage() {
                     </div>
                     <div>
                       Margin used:{" "}
-                      <b>{selected.computed?.marginPctUsed == null ? "—" : pct(selected.computed.marginPctUsed)}</b>
+                      <b>
+                        {selected.computed?.marginPctUsed == null
+                          ? "—"
+                          : pct(selected.computed.marginPctUsed)}
+                      </b>
                     </div>
                     <div>
                       Gross margin:{" "}
-                      <b>{selected.computed?.grossMarginPct == null ? "—" : pct(selected.computed.grossMarginPct)}</b>
+                      <b>
+                        {selected.computed?.grossMarginPct == null
+                          ? "—"
+                          : pct(selected.computed.grossMarginPct)}
+                      </b>
                     </div>
                   </div>
                 </div>
@@ -1872,7 +2124,7 @@ export default function AdminProductsPage() {
                     <Button variant="secondary" onClick={closeDetails} disabled={busy}>
                       Cancelar
                     </Button>
-                    <Button onClick={saveEdits} disabled={busy || !editName.trim()}>
+                    <Button onClick={saveEdits} disabled={busy || !editName.trim() || !editBranchId}>
                       Guardar cambios
                     </Button>
                   </div>

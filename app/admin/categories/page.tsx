@@ -27,7 +27,7 @@ import {
 type Category = {
   id: string;
   name: string;
-  branchId: string | null;
+  branchId: string; // ✅ ahora SIEMPRE existe
   description: string | null;
   imageUrl: string | null;
   tags: string[];
@@ -128,7 +128,7 @@ export default function AdminCategoriesPage() {
   const [tagsRaw, setTagsRaw] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
 
-  // filters
+  // filters (solo UI)
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
 
@@ -151,8 +151,10 @@ export default function AdminCategoriesPage() {
   const filtered = useMemo(() => {
     let base = items;
     if (onlyActive) base = base.filter((c) => c.isActive);
+
     const qq = q.trim().toLowerCase();
     if (!qq) return base;
+
     return base.filter((c) => {
       const hay =
         (c.name || "").toLowerCase().includes(qq) ||
@@ -178,10 +180,9 @@ export default function AdminCategoriesPage() {
     setLoading(true);
 
     try {
-      const data = await apiFetchAuthed<Category[]>(
-        getAccessToken,
-        `/categories${onlyActive ? "?onlyActive=true" : ""}`
-      );
+      // ✅ Scoped por JWT branchId. No pasamos branchId por query.
+      // ✅ Traemos todo y filtramos "solo activas" en UI
+      const data = await apiFetchAuthed<Category[]>(getAccessToken, `/categories`);
 
       setItems(data);
 
@@ -408,10 +409,7 @@ export default function AdminCategoriesPage() {
 
         {/* Create */}
         <Card>
-          <CardHeader
-            title="Crear categoría"
-            subtitle="Nombre, tags, orden e imagen"
-          />
+          <CardHeader title="Crear categoría" subtitle="Nombre, tags, orden e imagen" />
           <div className="flex items-start justify-between px-5 pt-2">
             <div className="text-sm text-zinc-500">
               Tip: tags en formato <b>coma-separado</b>. SortOrder define el orden.
@@ -527,6 +525,7 @@ export default function AdminCategoriesPage() {
                           value={d.name}
                           onChange={(e) => setDraft(c.id, { name: e.target.value })}
                         />
+
                         <div className="text-xs text-zinc-500">
                           {c.imageUrl ? (
                             <span className="inline-flex items-center gap-2">
@@ -552,9 +551,7 @@ export default function AdminCategoriesPage() {
                     <td className="px-4 py-3">
                       <Input
                         value={d.description}
-                        onChange={(e) =>
-                          setDraft(c.id, { description: e.target.value })
-                        }
+                        onChange={(e) => setDraft(c.id, { description: e.target.value })}
                         placeholder="Opcional"
                       />
                     </td>
@@ -585,9 +582,7 @@ export default function AdminCategoriesPage() {
                     <td className="px-4 py-3">
                       <Input
                         value={d.sortOrder}
-                        onChange={(e) =>
-                          setDraft(c.id, { sortOrder: e.target.value })
-                        }
+                        onChange={(e) => setDraft(c.id, { sortOrder: e.target.value })}
                         inputMode="numeric"
                         className="w-24"
                       />
