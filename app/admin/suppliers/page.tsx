@@ -18,6 +18,12 @@ import {
   X,
   PackageSearch,
   Pencil,
+  Trash2,
+  Send,
+  BadgeCheck,
+  Ban,
+  ClipboardList,
+  FileText,
 } from "lucide-react";
 
 // ------------------------------------
@@ -172,11 +178,44 @@ function isOrderClosed(status: PurchaseOrderStatus) {
 }
 
 function canReceive(status: PurchaseOrderStatus) {
-  return (
-    status === "SENT" ||
-    status === "CONFIRMED" ||
-    status === "RECEIVED_PARTIAL"
-  );
+  return status === "SENT" || status === "CONFIRMED" || status === "RECEIVED_PARTIAL";
+}
+
+function poStatusLabel(s: PurchaseOrderStatus) {
+  switch (s) {
+    case "DRAFT":
+      return "Borrador";
+    case "SENT":
+      return "Enviado";
+    case "CONFIRMED":
+      return "Confirmado";
+    case "RECEIVED_PARTIAL":
+      return "Recibido parcial";
+    case "RECEIVED":
+      return "Recibido";
+    case "CANCELLED":
+      return "Cancelado";
+    default:
+      return s;
+  }
+}
+
+function poStatusClasses(s: PurchaseOrderStatus) {
+  switch (s) {
+    case "RECEIVED":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "RECEIVED_PARTIAL":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "CONFIRMED":
+      return "border-indigo-200 bg-indigo-50 text-indigo-700";
+    case "SENT":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    case "CANCELLED":
+      return "border-red-200 bg-red-50 text-red-700";
+    case "DRAFT":
+    default:
+      return "border-zinc-200 bg-zinc-50 text-zinc-700";
+  }
 }
 
 const WEEKDAY_LABEL: Record<Weekday, string> = {
@@ -208,6 +247,25 @@ function formatOrderDays(days?: Weekday[]) {
   const arr = Array.isArray(days) ? days : [];
   if (!arr.length) return "—";
   return arr.map((d) => WEEKDAY_LABEL[d]).join(", ");
+}
+
+function fmtDate(iso?: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("es-AR", {
+    timeZone: "America/Argentina/Cordoba",
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function numStr(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : "";
 }
 
 // ------------------------------
@@ -257,8 +315,7 @@ function SupplierModal({
   }
 
   const isAccount = form.workMode === "ACCOUNT";
-  const paymentDaysStr =
-    form.paymentDays == null ? "" : String(form.paymentDays);
+  const paymentDaysStr = form.paymentDays == null ? "" : String(form.paymentDays);
 
   return (
     <div className="fixed inset-0 z-[70]">
@@ -267,9 +324,7 @@ function SupplierModal({
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
             <div className="text-xs text-zinc-500">Editar proveedor</div>
-            <div className="text-lg font-semibold text-zinc-900">
-              {initial.name}
-            </div>
+            <div className="text-lg font-semibold text-zinc-900">{initial.name}</div>
           </div>
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             <span className="inline-flex items-center gap-2">
@@ -296,9 +351,7 @@ function SupplierModal({
                   setForm((p) => ({
                     ...p,
                     workMode: e.target.value as SupplierWorkMode,
-                    // si pasa a inmediato, limpiamos paymentDays
-                    paymentDays:
-                      e.target.value === "IMMEDIATE" ? null : p.paymentDays ?? null,
+                    paymentDays: e.target.value === "IMMEDIATE" ? null : p.paymentDays ?? null,
                   }))
                 }
               >
@@ -315,10 +368,7 @@ function SupplierModal({
                 onChange={(e) =>
                   setForm((p) => ({
                     ...p,
-                    paymentDays:
-                      e.target.value.trim() === ""
-                        ? null
-                        : Number(e.target.value),
+                    paymentDays: e.target.value.trim() === "" ? null : Number(e.target.value),
                   }))
                 }
                 placeholder={isAccount ? "Ej: 15 / 30 / 45" : "—"}
@@ -329,9 +379,7 @@ function SupplierModal({
 
             <Field label="Días de pedido">
               <div className="flex flex-wrap gap-2">
-                {(
-                  ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as Weekday[]
-                ).map((d) => {
+                {(["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as Weekday[]).map((d) => {
                   const active = orderDays.includes(d);
                   return (
                     <button
@@ -358,25 +406,18 @@ function SupplierModal({
             <Field label="Hora límite (cutoff)">
               <Input
                 value={(form.cutoffTime ?? "") as string}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, cutoffTime: e.target.value }))
-                }
+                onChange={(e) => setForm((p) => ({ ...p, cutoffTime: e.target.value }))}
                 placeholder='Ej: "12:00"'
               />
             </Field>
 
             <Field label="Entrega en (días)">
               <Input
-                value={
-                  form.leadTimeDays == null ? "" : String(form.leadTimeDays)
-                }
+                value={form.leadTimeDays == null ? "" : String(form.leadTimeDays)}
                 onChange={(e) =>
                   setForm((p) => ({
                     ...p,
-                    leadTimeDays:
-                      e.target.value.trim() === ""
-                        ? null
-                        : Number(e.target.value),
+                    leadTimeDays: e.target.value.trim() === "" ? null : Number(e.target.value),
                   }))
                 }
                 placeholder="Ej: 1 / 2 / 3"
@@ -389,51 +430,37 @@ function SupplierModal({
             <Field label="Contacto">
               <Input
                 value={(form.contactName ?? "") as string}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, contactName: e.target.value }))
-                }
-                placeholder="Ej: Juan"
+                onChange={(e) => setForm((p) => ({ ...p, contactName: e.target.value }))}
               />
             </Field>
             <Field label="Teléfono">
               <Input
                 value={(form.phone ?? "") as string}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, phone: e.target.value }))
-                }
-                placeholder="Ej: +54 351 ..."
+                onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
               />
             </Field>
             <Field label="Email">
               <Input
                 value={(form.email ?? "") as string}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, email: e.target.value }))
-                }
-                placeholder="Ej: compras@proveedor.com"
+                onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
               />
             </Field>
             <Field label="CUIT / Tax ID">
               <Input
                 value={(form.taxId ?? "") as string}
                 onChange={(e) => setForm((p) => ({ ...p, taxId: e.target.value }))}
-                placeholder="Ej: 20-XXXXXXXX-X"
               />
             </Field>
             <Field label="Dirección">
               <Input
                 value={(form.address ?? "") as string}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, address: e.target.value }))
-                }
-                placeholder="Calle, ciudad…"
+                onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
               />
             </Field>
             <Field label="Notas">
               <Input
                 value={(form.notes ?? "") as string}
                 onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-                placeholder="Condiciones especiales…"
               />
             </Field>
           </div>
@@ -457,7 +484,7 @@ function SupplierModal({
 }
 
 // ------------------------------
-// Ingredient picker (lo tuyo)
+// Ingredient picker
 // ------------------------------
 function IngredientPicker({
   open,
@@ -486,9 +513,10 @@ function IngredientPicker({
       )}${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ""}`;
 
       const data = await apiFetchAuthed<IngredientLite[]>(getAccessToken, url);
-      setItems(data);
+      setItems(Array.isArray(data) ? data : []);
     } catch (e: any) {
       setErr(e?.message || "Error cargando ingredientes");
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -518,9 +546,7 @@ function IngredientPicker({
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
             <div className="text-xs text-zinc-500">Seleccionar ingrediente</div>
-            <div className="text-lg font-semibold text-zinc-900">
-              {supplier.name}
-            </div>
+            <div className="text-lg font-semibold text-zinc-900">{supplier.name}</div>
           </div>
           <Button variant="secondary" onClick={onClose}>
             <span className="inline-flex items-center gap-2">
@@ -594,10 +620,7 @@ function IngredientPicker({
                         {ing.baseUnit || "—"}
                       </td>
                       <td className="px-4 py-3 text-sm text-zinc-700">
-                        {money(
-                          ing.cost?.lastCost ?? 0,
-                          ing.cost?.currency ?? "ARS"
-                        )}
+                        {money(ing.cost?.lastCost ?? 0, ing.cost?.currency ?? "ARS")}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <Button onClick={() => onPick(ing)} variant="secondary">
@@ -611,8 +634,7 @@ function IngredientPicker({
           </div>
 
           <div className="text-xs text-zinc-500">
-            Si tu endpoint de ingredientes no soporta <b>supplierId</b> o{" "}
-            <b>q</b>, decime y lo adapto a tu API real.
+            Si tu endpoint de ingredientes no soporta <b>supplierId</b> o <b>q</b>, decime y lo adapto.
           </div>
         </div>
       </div>
@@ -630,7 +652,7 @@ export default function AdminSuppliersPage() {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
-  // create supplier (expanded)
+  // create supplier (fields)
   const [name, setName] = useState("");
   const [workMode, setWorkMode] = useState<SupplierWorkMode>("IMMEDIATE");
   const [paymentDays, setPaymentDays] = useState<string>("");
@@ -653,13 +675,37 @@ export default function AdminSuppliersPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
 
+  // drawer crear proveedor
+  const [createOpen, setCreateOpen] = useState(false);
+
+  function openCreate() {
+    setCreateOpen(true);
+    setErr(null);
+    setOk(null);
+  }
+
+  function closeCreate() {
+    setCreateOpen(false);
+    // reset (opcional pero recomendado)
+    setName("");
+    setWorkMode("IMMEDIATE");
+    setPaymentDays("");
+    setOrderDays([]);
+    setCutoffTime("");
+    setLeadTimeDays("");
+    setContactName("");
+    setPhone("");
+    setEmail("");
+    setTaxId("");
+    setAddress("");
+    setNotes("");
+  }
+
   // ----------------------
-  // Orders drawer state (tu código)
+  // Orders drawer state
   // ----------------------
   const [ordersOpen, setOrdersOpen] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(
-    null
-  );
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -679,20 +725,14 @@ export default function AdminSuppliersPage() {
   >([{ ingredientId: "", qty: "" }]);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(
-    null
-  );
+  const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(null);
 
   // receive form (drafts per ingredient)
-  const [receivePrices, setReceivePrices] = useState<Record<string, string>>(
-    {}
-  );
+  const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
   const [receiveQtys, setReceiveQtys] = useState<Record<string, string>>({});
 
   // invoice url per order (controlled locally)
-  const [invoiceUrlByOrder, setInvoiceUrlByOrder] = useState<
-    Record<string, string>
-  >({});
+  const [invoiceUrlByOrder, setInvoiceUrlByOrder] = useState<Record<string, string>>({});
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -716,11 +756,8 @@ export default function AdminSuppliersPage() {
     setOk(null);
     setLoading(true);
     try {
-      const data = await apiFetchAuthed<Supplier[]>(
-        getAccessToken,
-        "/suppliers"
-      );
-      setItems(data);
+      const data = await apiFetchAuthed<Supplier[]>(getAccessToken, "/suppliers");
+      setItems(Array.isArray(data) ? data : []);
       flashOk("Datos actualizados ✔");
     } catch (e: any) {
       setErr(e?.message || "Error cargando proveedores");
@@ -735,13 +772,11 @@ export default function AdminSuppliersPage() {
   }, []);
 
   function toggleCreateDay(d: Weekday) {
-    setOrderDays((prev) =>
-      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
-    );
+    setOrderDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
   }
 
-  async function create() {
-    if (!name.trim()) return;
+  async function create(): Promise<boolean> {
+    if (!name.trim()) return false;
 
     setErr(null);
     setOk(null);
@@ -773,25 +808,12 @@ export default function AdminSuppliersPage() {
         body: JSON.stringify(payload),
       });
 
-      // reset
-      setName("");
-      setWorkMode("IMMEDIATE");
-      setPaymentDays("");
-      setOrderDays([]);
-      setCutoffTime("");
-      setLeadTimeDays("");
-
-      setContactName("");
-      setPhone("");
-      setEmail("");
-      setTaxId("");
-      setAddress("");
-      setNotes("");
-
       flashOk("Proveedor creado ✔");
       await load();
+      return true;
     } catch (e: any) {
       setErr(e?.message || "Error creando proveedor");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -845,7 +867,7 @@ export default function AdminSuppliersPage() {
   }
 
   // ----------------------
-  // Orders helpers (tu código, intacto)
+  // Orders helpers
   // ----------------------
   async function loadOrders(supplierId: string) {
     setOrdersLoading(true);
@@ -855,13 +877,15 @@ export default function AdminSuppliersPage() {
         getAccessToken,
         `/purchase-orders?supplierId=${encodeURIComponent(supplierId)}&limit=100`
       );
-      setOrders(data);
+      const arr = Array.isArray(data) ? data : [];
+      setOrders(arr);
 
       const seed: Record<string, string> = {};
-      for (const o of data) seed[o.id] = o.invoice?.imageUrl ?? "";
+      for (const o of arr) seed[o.id] = o.invoice?.imageUrl ?? "";
       setInvoiceUrlByOrder(seed);
     } catch (e: any) {
       setErr(e?.message || "Error cargando pedidos");
+      setOrders([]);
     } finally {
       setOrdersLoading(false);
     }
@@ -895,9 +919,7 @@ export default function AdminSuppliersPage() {
   }
 
   function removeLine(i: number) {
-    setPoLines((prev) =>
-      prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)
-    );
+    setPoLines((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
   }
 
   function setLine(
@@ -911,9 +933,7 @@ export default function AdminSuppliersPage() {
       qty: string;
     }>
   ) {
-    setPoLines((prev) =>
-      prev.map((x, idx) => (idx === i ? { ...x, ...patch } : x))
-    );
+    setPoLines((prev) => prev.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
   }
 
   function openPickerForLine(i: number) {
@@ -981,14 +1001,10 @@ export default function AdminSuppliersPage() {
     setOrdersBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(
-        getAccessToken,
-        `/purchase-orders/${orderId}/status`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        }
-      );
+      await apiFetchAuthed(getAccessToken, `/purchase-orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
       flashOk("Estado actualizado ✔");
       if (selectedSupplier) await loadOrders(selectedSupplier.id);
     } catch (e: any) {
@@ -1024,23 +1040,17 @@ export default function AdminSuppliersPage() {
       .filter(Boolean);
 
     if (!payloadItems.length) {
-      setErr(
-        "Cargá al menos una cantidad recibida o un precio real (en algún ítem)."
-      );
+      setErr("Cargá al menos una cantidad recibida o un precio real (en algún ítem).");
       return;
     }
 
     setOrdersBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(
-        getAccessToken,
-        `/purchase-orders/${order.id}/receive`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ items: payloadItems }),
-        }
-      );
+      await apiFetchAuthed(getAccessToken, `/purchase-orders/${order.id}/receive`, {
+        method: "PATCH",
+        body: JSON.stringify({ items: payloadItems }),
+      });
 
       flashOk("Recepción aplicada ✔ (stock actualizado)");
       setReceivePrices({});
@@ -1064,14 +1074,10 @@ export default function AdminSuppliersPage() {
     setOrdersBusy(true);
     setErr(null);
     try {
-      await apiFetchAuthed(
-        getAccessToken,
-        `/purchase-orders/${orderId}/invoice`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ imageUrl }),
-        }
-      );
+      await apiFetchAuthed(getAccessToken, `/purchase-orders/${orderId}/invoice`, {
+        method: "PATCH",
+        body: JSON.stringify({ imageUrl }),
+      });
       flashOk("Factura adjuntada ✔");
       if (selectedSupplier) await loadOrders(selectedSupplier.id);
     } catch (e: any) {
@@ -1080,6 +1086,16 @@ export default function AdminSuppliersPage() {
       setOrdersBusy(false);
     }
   }
+
+  // ----------------------
+  // Derived
+  // ----------------------
+  const ordersStats = useMemo(() => {
+    const open = orders.filter((o) => !isOrderClosed(o.status)).length;
+    const drafts = orders.filter((o) => o.status === "DRAFT").length;
+    const pendingReceive = orders.filter((o) => canReceive(o.status)).length;
+    return { open, drafts, pendingReceive };
+  }, [orders]);
 
   return (
     <AdminProtected>
@@ -1109,6 +1125,13 @@ export default function AdminSuppliersPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button onClick={openCreate} disabled={busy}>
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Crear
+                </span>
+              </Button>
+
               <Button
                 variant="secondary"
                 onClick={load}
@@ -1151,135 +1174,6 @@ export default function AdminSuppliersPage() {
             </div>
           </div>
         </div>
-
-        {/* Create */}
-        <Card>
-          <CardHeader title="Crear proveedor" subtitle="Ahora con forma de trabajo y días de pedido" />
-          <CardBody>
-            <div className="grid gap-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Nombre">
-                  <div className="relative">
-                    <Truck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Ej: Distribuidora Pepe"
-                      className="pl-9"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") create();
-                      }}
-                    />
-                  </div>
-                </Field>
-
-                <Field label="Forma de trabajo">
-                  <Select
-                    value={workMode}
-                    onChange={(e) => {
-                      const v = e.target.value as SupplierWorkMode;
-                      setWorkMode(v);
-                      if (v !== "ACCOUNT") setPaymentDays("");
-                    }}
-                  >
-                    <option value="IMMEDIATE">Pago inmediato</option>
-                    <option value="AGAINST_INVOICE">Contra factura</option>
-                    <option value="ACCOUNT">Cuenta corriente</option>
-                    <option value="MIXED">Mixto</option>
-                  </Select>
-                </Field>
-
-                <Field label="Pago a X días (cuenta corriente)">
-                  <Input
-                    value={paymentDays}
-                    onChange={(e) => setPaymentDays(e.target.value)}
-                    placeholder="Ej: 15 / 30 / 45"
-                    inputMode="numeric"
-                    disabled={workMode !== "ACCOUNT"}
-                  />
-                </Field>
-
-                <Field label="Días de pedido">
-                  <div className="flex flex-wrap gap-2">
-                    {(Object.keys(WEEKDAY_LABEL) as Weekday[]).map((d) => {
-                      const active = orderDays.includes(d);
-                      return (
-                        <button
-                          key={d}
-                          type="button"
-                          onClick={() => toggleCreateDay(d)}
-                          className={cn(
-                            "rounded-full border px-3 py-1 text-sm",
-                            active
-                              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                              : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-                          )}
-                        >
-                          {WEEKDAY_LABEL[d]}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-1 text-xs text-zinc-500">
-                    Seleccionados: <b>{formatOrderDays(orderDays)}</b>
-                  </div>
-                </Field>
-
-                <Field label="Hora límite (cutoff)">
-                  <Input
-                    value={cutoffTime}
-                    onChange={(e) => setCutoffTime(e.target.value)}
-                    placeholder='Ej: "12:00"'
-                  />
-                </Field>
-
-                <Field label="Entrega en (días)">
-                  <Input
-                    value={leadTimeDays}
-                    onChange={(e) => setLeadTimeDays(e.target.value)}
-                    placeholder="Ej: 1 / 2 / 3"
-                    inputMode="numeric"
-                  />
-                </Field>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Contacto">
-                  <Input value={contactName} onChange={(e) => setContactName(e.target.value)} />
-                </Field>
-                <Field label="Teléfono">
-                  <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
-                </Field>
-                <Field label="Email">
-                  <Input value={email} onChange={(e) => setEmail(e.target.value)} />
-                </Field>
-                <Field label="CUIT / Tax ID">
-                  <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} />
-                </Field>
-                <Field label="Dirección">
-                  <Input value={address} onChange={(e) => setAddress(e.target.value)} />
-                </Field>
-                <Field label="Notas">
-                  <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
-                </Field>
-              </div>
-
-              <div className="flex justify-end">
-                <Button
-                  className="w-full md:w-auto"
-                  onClick={create}
-                  loading={busy}
-                  disabled={busy || !name.trim()}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <Plus className="h-4 w-4" />
-                    Crear
-                  </span>
-                </Button>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
 
         {/* List */}
         <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
@@ -1426,7 +1320,174 @@ export default function AdminSuppliersPage() {
           onSave={saveEdit}
         />
 
-        {/* Orders Drawer (tu código original, no lo toqué) */}
+        {/* Drawer: Crear Proveedor */}
+        {createOpen && (
+          <div className="fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/30" onClick={closeCreate} />
+
+            <div className="absolute right-0 top-0 h-full w-full max-w-3xl bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b px-5 py-4">
+                <div>
+                  <div className="text-xs text-zinc-500">Nuevo proveedor</div>
+                  <div className="text-lg font-semibold text-zinc-900">Crear proveedor</div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button variant="secondary" onClick={closeCreate} disabled={busy}>
+                    <span className="inline-flex items-center gap-2">
+                      <X className="h-4 w-4" />
+                      Cerrar
+                    </span>
+                  </Button>
+                </div>
+              </div>
+
+              <div className="h-[calc(100%-64px)] overflow-y-auto p-5 space-y-6">
+                <div className="rounded-2xl border border-zinc-200 bg-white p-5">
+                  <div className="grid gap-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Field label="Nombre">
+                        <div className="relative">
+                          <Truck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                          <Input
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder="Ej: Distribuidora Pepe"
+                            className="pl-9"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                (async () => {
+                                  const created = await create();
+                                  if (created) closeCreate();
+                                })();
+                              }
+                            }}
+                          />
+                        </div>
+                      </Field>
+
+                      <Field label="Forma de trabajo">
+                        <Select
+                          value={workMode}
+                          onChange={(e) => {
+                            const v = e.target.value as SupplierWorkMode;
+                            setWorkMode(v);
+                            if (v !== "ACCOUNT") setPaymentDays("");
+                          }}
+                        >
+                          <option value="IMMEDIATE">Pago inmediato</option>
+                          <option value="AGAINST_INVOICE">Contra factura</option>
+                          <option value="ACCOUNT">Cuenta corriente</option>
+                          <option value="MIXED">Mixto</option>
+                        </Select>
+                      </Field>
+
+                      <Field label="Pago a X días (cuenta corriente)">
+                        <Input
+                          value={paymentDays}
+                          onChange={(e) => setPaymentDays(e.target.value)}
+                          placeholder="Ej: 15 / 30 / 45"
+                          inputMode="numeric"
+                          disabled={workMode !== "ACCOUNT"}
+                        />
+                      </Field>
+
+                      <Field label="Días de pedido">
+                        <div className="flex flex-wrap gap-2">
+                          {(Object.keys(WEEKDAY_LABEL) as Weekday[]).map((d) => {
+                            const active = orderDays.includes(d);
+                            return (
+                              <button
+                                key={d}
+                                type="button"
+                                onClick={() => toggleCreateDay(d)}
+                                className={cn(
+                                  "rounded-full border px-3 py-1 text-sm",
+                                  active
+                                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                    : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                                )}
+                              >
+                                {WEEKDAY_LABEL[d]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          Seleccionados: <b>{formatOrderDays(orderDays)}</b>
+                        </div>
+                      </Field>
+
+                      <Field label="Hora límite (cutoff)">
+                        <Input
+                          value={cutoffTime}
+                          onChange={(e) => setCutoffTime(e.target.value)}
+                          placeholder='Ej: "12:00"'
+                        />
+                      </Field>
+
+                      <Field label="Entrega en (días)">
+                        <Input
+                          value={leadTimeDays}
+                          onChange={(e) => setLeadTimeDays(e.target.value)}
+                          placeholder="Ej: 1 / 2 / 3"
+                          inputMode="numeric"
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <Field label="Contacto">
+                        <Input value={contactName} onChange={(e) => setContactName(e.target.value)} />
+                      </Field>
+                      <Field label="Teléfono">
+                        <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+                      </Field>
+                      <Field label="Email">
+                        <Input value={email} onChange={(e) => setEmail(e.target.value)} />
+                      </Field>
+                      <Field label="CUIT / Tax ID">
+                        <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} />
+                      </Field>
+                      <Field label="Dirección">
+                        <Input value={address} onChange={(e) => setAddress(e.target.value)} />
+                      </Field>
+                      <Field label="Notas">
+                        <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+                      </Field>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button variant="secondary" onClick={closeCreate} disabled={busy}>
+                        Cancelar
+                      </Button>
+
+                      <Button
+                        onClick={async () => {
+                          const created = await create();
+                          if (created) closeCreate();
+                        }}
+                        loading={busy}
+                        disabled={busy || !name.trim()}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Plus className="h-4 w-4" />
+                          Crear proveedor
+                        </span>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-zinc-500">
+                  Tip: si un proveedor no aparece en conteos, revisá que esté <b>ACTIVO</b>.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Orders Drawer */}
         {ordersOpen && selectedSupplier && (
           <div className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-black/30" onClick={closeOrders} />
@@ -1436,6 +1497,17 @@ export default function AdminSuppliersPage() {
                   <div className="text-xs text-zinc-500">Pedidos a proveedor</div>
                   <div className="text-lg font-semibold text-zinc-900">
                     {selectedSupplier.name}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-600">
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1">
+                      Abiertos: <b>{ordersStats.open}</b>
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1">
+                      Borrador: <b>{ordersStats.drafts}</b>
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1">
+                      Para recibir: <b>{ordersStats.pendingReceive}</b>
+                    </span>
                   </div>
                 </div>
 
@@ -1457,11 +1529,397 @@ export default function AdminSuppliersPage() {
                 </div>
               </div>
 
-              {/* --- acá sigue tu drawer tal cual --- */}
               <div className="h-[calc(100%-64px)] overflow-y-auto p-5 space-y-6">
-                {/* ... tu contenido de pedidos completo ... */}
-                {/* Para no duplicar 500 líneas, dejalo como ya lo tenías debajo. */}
-                {/* Si querés que te lo vuelva a pegar entero, decime y lo pego 1:1. */}
+                {/* Crear pedido */}
+                <Card>
+                  <CardHeader title="Crear pedido" subtitle="Agregá ingredientes y cantidad" />
+                  <CardBody>
+                    <div className="space-y-4">
+                      <Field label="Notas (opcional)">
+                        <Input
+                          value={poNotes}
+                          onChange={(e) => setPoNotes(e.target.value)}
+                          placeholder="Ej: entregar antes del mediodía..."
+                        />
+                      </Field>
+
+                      <div className="rounded-2xl border border-zinc-200 overflow-hidden">
+                        <table className="min-w-full">
+                          <thead className="bg-zinc-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                Ingrediente
+                              </th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                Cantidad
+                              </th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                Unidad
+                              </th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                Últ. costo
+                              </th>
+                              <th className="px-4 py-3" />
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100">
+                            {poLines.map((l, idx) => (
+                              <tr key={idx} className="hover:bg-zinc-50">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="secondary"
+                                      onClick={() => openPickerForLine(idx)}
+                                    >
+                                      Elegir
+                                    </Button>
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-semibold text-zinc-900 truncate">
+                                        {l.ingredientLabel || "—"}
+                                      </div>
+                                      <div className="text-xs text-zinc-500 truncate">
+                                        {l.ingredientId ? l.ingredientId : ""}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <Input
+                                    value={l.qty}
+                                    onChange={(e) => setLine(idx, { qty: e.target.value })}
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-sm text-zinc-700">
+                                  {l.unit || "—"}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-zinc-700">
+                                  {money(l.lastCost ?? 0, l.currency ?? "ARS")}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <Button
+                                    variant="danger"
+                                    onClick={() => removeLine(idx)}
+                                    disabled={poLines.length <= 1}
+                                  >
+                                    <span className="inline-flex items-center gap-2">
+                                      <Trash2 className="h-4 w-4" />
+                                    </span>
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Button variant="secondary" onClick={addLine}>
+                          <span className="inline-flex items-center gap-2">
+                            <Plus className="h-4 w-4" />
+                            Agregar línea
+                          </span>
+                        </Button>
+
+                        <Button onClick={createOrder} loading={ordersBusy} disabled={ordersBusy}>
+                          <span className="inline-flex items-center gap-2">
+                            <ClipboardList className="h-4 w-4" />
+                            Crear pedido
+                          </span>
+                        </Button>
+                      </div>
+                    </div>
+                  </CardBody>
+                </Card>
+
+                {/* Listado pedidos */}
+                <Card>
+                  <CardHeader title="Pedidos" subtitle="Historial y acciones" />
+                  <CardBody>
+                    {ordersLoading ? (
+                      <div className="text-sm text-zinc-500">Cargando…</div>
+                    ) : orders.length === 0 ? (
+                      <div className="text-sm text-zinc-500">No hay pedidos para este proveedor.</div>
+                    ) : (
+                      <div className="space-y-4">
+                        {orders.map((o) => (
+                          <div
+                            key={o.id}
+                            className="rounded-2xl border border-zinc-200 bg-white p-4"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-sm font-semibold text-zinc-900">
+                                    Pedido #{o.id.slice(-6)}
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                      poStatusClasses(o.status)
+                                    )}
+                                  >
+                                    {poStatusLabel(o.status)}
+                                  </span>
+                                </div>
+                                <div className="mt-1 text-xs text-zinc-600">
+                                  Fecha: <b>{fmtDate(o.orderDate)}</b>
+                                  {o.expectedDate ? (
+                                    <>
+                                      {" "}
+                                      · Esperada: <b>{fmtDate(o.expectedDate)}</b>
+                                    </>
+                                  ) : null}
+                                </div>
+                                {o.notes ? (
+                                  <div className="mt-2 text-sm text-zinc-700">
+                                    <b>Notas:</b> {o.notes}
+                                  </div>
+                                ) : null}
+
+                                <div className="mt-3 flex flex-wrap gap-3 text-sm">
+                                  <span className="text-zinc-700">
+                                    Aprox:{" "}
+                                    <b>
+                                      {money(o.totals?.approxTotal ?? 0, o.totals?.currency ?? "ARS")}
+                                    </b>
+                                  </span>
+                                  <span className="text-zinc-700">
+                                    Real:{" "}
+                                    <b>
+                                      {o.totals?.realTotal == null
+                                        ? "—"
+                                        : money(o.totals.realTotal, o.totals.currency)}
+                                    </b>
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                {!isOrderClosed(o.status) && (
+                                  <>
+                                    {o.status === "DRAFT" && (
+                                      <Button
+                                        variant="secondary"
+                                        onClick={() => setOrderStatus(o.id, "SENT")}
+                                        disabled={ordersBusy}
+                                      >
+                                        <span className="inline-flex items-center gap-2">
+                                          <Send className="h-4 w-4" />
+                                          Marcar Enviado
+                                        </span>
+                                      </Button>
+                                    )}
+
+                                    {o.status === "SENT" && (
+                                      <Button
+                                        variant="secondary"
+                                        onClick={() => setOrderStatus(o.id, "CONFIRMED")}
+                                        disabled={ordersBusy}
+                                      >
+                                        <span className="inline-flex items-center gap-2">
+                                          <BadgeCheck className="h-4 w-4" />
+                                          Confirmar
+                                        </span>
+                                      </Button>
+                                    )}
+
+                                    <Button
+                                      variant="danger"
+                                      onClick={() => {
+                                        if (!window.confirm("¿Cancelar este pedido?")) return;
+                                        setOrderStatus(o.id, "CANCELLED");
+                                      }}
+                                      disabled={ordersBusy}
+                                    >
+                                      <span className="inline-flex items-center gap-2">
+                                        <Ban className="h-4 w-4" />
+                                        Cancelar
+                                      </span>
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Items */}
+                            <div className="mt-4 overflow-hidden rounded-xl border border-zinc-200">
+                              <table className="min-w-full">
+                                <thead className="bg-zinc-50">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Ingrediente
+                                    </th>
+                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Pedido
+                                    </th>
+                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Recibido
+                                    </th>
+                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Precio real
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-100">
+                                  {(o.items || []).map((it) => (
+                                    <tr key={it.ingredientId} className="hover:bg-zinc-50">
+                                      <td className="px-3 py-2">
+                                        <div className="text-sm font-semibold text-zinc-900">
+                                          {it.ingredientName || it.ingredientId}
+                                        </div>
+                                        {it.name_for_supplier ? (
+                                          <div className="text-xs text-zinc-500">
+                                            Prov: {it.name_for_supplier}
+                                          </div>
+                                        ) : null}
+                                      </td>
+                                      <td className="px-3 py-2 text-sm text-zinc-700">
+                                        {it.qty} {it.unit || ""}
+                                      </td>
+                                      <td className="px-3 py-2 text-sm text-zinc-700">
+                                        {Number(it.receivedQty ?? 0)} {it.unit || ""}
+                                      </td>
+                                      <td className="px-3 py-2 text-sm text-zinc-700">
+                                        {it.realUnitPrice == null ? "—" : money(it.realUnitPrice, o.totals?.currency ?? "ARS")}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* Recepción */}
+                            {canReceive(o.status) && (
+                              <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="text-sm font-semibold text-sky-900">
+                                      Recepción (actualiza stock)
+                                    </div>
+                                    <div className="text-xs text-sky-800/80">
+                                      Cargá <b>cantidad recibida</b> y/o <b>precio real</b> por ítem. No baja valores.
+                                    </div>
+                                  </div>
+                                  <Button
+                                    onClick={() => receiveOrder(o)}
+                                    loading={ordersBusy}
+                                    disabled={ordersBusy}
+                                  >
+                                    Aplicar recepción
+                                  </Button>
+                                </div>
+
+                                <div className="mt-3 overflow-hidden rounded-xl border border-sky-200 bg-white">
+                                  <table className="min-w-full">
+                                    <thead className="bg-sky-50">
+                                      <tr>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-sky-700">
+                                          Ítem
+                                        </th>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-sky-700">
+                                          Nuevo recibido
+                                        </th>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-sky-700">
+                                          Precio real
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-zinc-100">
+                                      {(o.items || []).map((it) => (
+                                        <tr key={it.ingredientId} className="hover:bg-zinc-50">
+                                          <td className="px-3 py-2">
+                                            <div className="text-sm font-semibold text-zinc-900">
+                                              {it.ingredientName || it.ingredientId}
+                                            </div>
+                                            <div className="text-xs text-zinc-500">
+                                              Pedido: <b>{it.qty}</b> · Actual recibido:{" "}
+                                              <b>{Number(it.receivedQty ?? 0)}</b>
+                                            </div>
+                                          </td>
+                                          <td className="px-3 py-2">
+                                            <Input
+                                              value={receiveQtys[it.ingredientId] ?? ""}
+                                              onChange={(e) =>
+                                                setReceiveQtys((p) => ({
+                                                  ...p,
+                                                  [it.ingredientId]: e.target.value,
+                                                }))
+                                              }
+                                              placeholder={numStr(it.receivedQty ?? 0)}
+                                              inputMode="decimal"
+                                            />
+                                          </td>
+                                          <td className="px-3 py-2">
+                                            <Input
+                                              value={receivePrices[it.ingredientId] ?? ""}
+                                              onChange={(e) =>
+                                                setReceivePrices((p) => ({
+                                                  ...p,
+                                                  [it.ingredientId]: e.target.value,
+                                                }))
+                                              }
+                                              placeholder={it.realUnitPrice == null ? "0" : String(it.realUnitPrice)}
+                                              inputMode="decimal"
+                                            />
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Factura */}
+                            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-zinc-900">
+                                    Factura (URL)
+                                  </div>
+                                  <div className="text-xs text-zinc-600">
+                                    Pegá URL (imagen/pdf). Se guarda en el pedido.
+                                  </div>
+                                </div>
+
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => attachInvoice(o.id)}
+                                  disabled={ordersBusy}
+                                >
+                                  <span className="inline-flex items-center gap-2">
+                                    <FileText className="h-4 w-4" />
+                                    Adjuntar
+                                  </span>
+                                </Button>
+                              </div>
+
+                              <div className="mt-3">
+                                <Input
+                                  value={invoiceUrlByOrder[o.id] ?? ""}
+                                  onChange={(e) =>
+                                    setInvoiceUrlByOrder((p) => ({
+                                      ...p,
+                                      [o.id]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="https://..."
+                                />
+                                {o.invoice?.imageUrl ? (
+                                  <div className="mt-2 text-xs text-zinc-600">
+                                    Actual: <b>{o.invoice.imageUrl}</b>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardBody>
+                </Card>
               </div>
             </div>
           </div>

@@ -355,7 +355,7 @@ export default function AdminHomePage() {
       {
         title: "Órdenes de compra",
         desc: "Pedidos a proveedores y recepción.",
-        href: "/admin/purchase-orders",
+        href: "/admin/suppliers",
         icon: <Truck className="h-5 w-5" />,
         allow: ["ADMIN", "MANAGER"],
         tone: "manager",
@@ -460,7 +460,7 @@ export default function AdminHomePage() {
   }, [links, roles]);
 
   const topLinks = visible.filter((l) =>
-    ["/manager/stock", "/admin/purchase-orders"].includes(l.href)
+    ["/admin/stock", "/admin/suppliers"].includes(l.href)
   );
 
   const opLinks = visible.filter((l) =>
@@ -606,7 +606,7 @@ export default function AdminHomePage() {
             Bajo mínimo • Sin conteo: <b>{stats.noCount}</b>
           </p>
           <Link
-            href="/manager/stock"
+            href="/admin/stock"
             className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
           >
             <Package className="h-4 w-4" />
@@ -629,11 +629,11 @@ export default function AdminHomePage() {
           <div className="mt-2 text-3xl font-bold">{stats.poPending}</div>
           <p className="text-sm text-zinc-600">Pendientes (abiertas)</p>
           <Link
-            href="/admin/purchase-orders"
+            href="/admin/suppliers"
             className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
           >
             <Truck className="h-4 w-4" />
-            Ver órdenes
+            Ver proveedores
             <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
