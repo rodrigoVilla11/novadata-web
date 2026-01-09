@@ -1,45 +1,51 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
-import { Save, RefreshCcw, Eye, Settings as SettingsIcon } from "lucide-react";
+import { Save, RefreshCcw, Settings as SettingsIcon } from "lucide-react";
 
 /* =============================================================================
- * Types
+ * Types (Branch)
  * ========================================================================== */
 
-type SettingsScope = "GLOBAL" | "BRANCH" | "SUBBRANCH";
-
-type BranchRow = {
-  id?: string;
-  _id?: string;
-  name?: string;
+type TimeRange = { open: string; close: string };
+type DaySchedule = { enabled: boolean; ranges: TimeRange[] };
+type WeekSchedule = {
+  mon: DaySchedule;
+  tue: DaySchedule;
+  wed: DaySchedule;
+  thu: DaySchedule;
+  fri: DaySchedule;
+  sat: DaySchedule;
+  sun: DaySchedule;
 };
 
-type SettingsDoc = {
+type BranchDoc = {
   _id?: string;
+  id?: string;
 
-  scope: SettingsScope;
-  branchId?: any | null;
-  subBranchId?: any | null;
+  name: string;
+  description?: string | null;
 
-  businessName?: string;
-  currency?: "ARS" | "USD";
-  timezone?: string;
+  isActive: boolean;
 
-  trackStock?: boolean;
-  allowNegativeStock?: boolean;
-  stockAlertDays?: number;
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
+  gps?: string | null;
 
-  allowManualDiscount?: boolean;
-  paymentMethods?: string[];
+  timezone: string;
 
-  allowUserRegister?: boolean;
+  schedule: WeekSchedule;
+
+  notes?: string | null;
 };
 
 /* =============================================================================
@@ -57,181 +63,219 @@ function safeBool(v: any, fallback = false) {
   return fallback;
 }
 
-function safeNum(v: any, fallback = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+function safeHHMM(v: string, fallback: string) {
+  const s = String(v ?? "").trim();
+  return HHMM.test(s) ? s : fallback;
 }
 
-const DEFAULTS: SettingsDoc = {
-  scope: "GLOBAL",
-  businessName: "Mi Negocio",
-  currency: "ARS",
+function makeEmptyDay(): DaySchedule {
+  return { enabled: true, ranges: [] };
+}
+
+function normalizeWeekSchedule(input: any): WeekSchedule {
+  const base: WeekSchedule = {
+    mon: makeEmptyDay(),
+    tue: makeEmptyDay(),
+    wed: makeEmptyDay(),
+    thu: makeEmptyDay(),
+    fri: makeEmptyDay(),
+    sat: makeEmptyDay(),
+    sun: makeEmptyDay(),
+  };
+
+  const w = input ?? {};
+  (Object.keys(base) as Array<keyof WeekSchedule>).forEach((k) => {
+    const d = w?.[k] ?? {};
+    const enabled =
+      typeof d?.enabled === "boolean" ? d.enabled : base[k].enabled;
+
+    const rangesRaw = Array.isArray(d?.ranges) ? d.ranges : [];
+    const ranges: TimeRange[] = rangesRaw
+      .map((r: any) => ({
+        open: safeHHMM(r?.open, "09:00"),
+        close: safeHHMM(r?.close, "18:00"),
+      }))
+      .filter((r: any) => HHMM.test(r.open) && HHMM.test(r.close));
+
+    base[k] = { enabled, ranges };
+  });
+
+  return base;
+}
+
+const DEFAULT_BRANCH: BranchDoc = {
+  name: "Mi Sucursal",
+  description: null,
+  isActive: true,
+  address: null,
+  city: null,
+  postalCode: null,
+  phone: null,
+  whatsapp: null,
+  gps: null,
   timezone: "America/Argentina/Buenos_Aires",
-  trackStock: true,
-  allowNegativeStock: false,
-  stockAlertDays: 5,
-  allowManualDiscount: true,
-  paymentMethods: ["CASH", "TRANSFER", "CARD"],
-  allowUserRegister: false,
+  schedule: normalizeWeekSchedule(null),
+  notes: null,
+};
+
+const DAY_LABEL: Record<keyof WeekSchedule, string> = {
+  mon: "Lunes",
+  tue: "Martes",
+  wed: "Miércoles",
+  thu: "Jueves",
+  fri: "Viernes",
+  sat: "Sábado",
+  sun: "Domingo",
 };
 
 /* =============================================================================
- * Page
+ * Page (ADMIN only, edits own branch)
  * ========================================================================== */
 
-export default function AdminSettingsPage() {
+export default function AdminBranchSettingsPage() {
   const { getAccessToken } = useAuth();
 
-  const [scope, setScope] = useState<SettingsScope>("GLOBAL");
-  const [branches, setBranches] = useState<BranchRow[]>([]);
-  const [branchId, setBranchId] = useState<string>("");
-  const [subBranchId, setSubBranchId] = useState<string>("");
-
-  const [data, setData] = useState<SettingsDoc | null>(null);
-  const [effective, setEffective] = useState<SettingsDoc | null>(null);
+  const [data, setData] = useState<BranchDoc | null>(null);
+  const [branchMeta, setBranchMeta] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [viewingEffective, setViewingEffective] = useState(false);
 
-  const canPickBranch = scope === "BRANCH" || scope === "SUBBRANCH";
-  const canPickSubBranch = scope === "SUBBRANCH";
-
-  /* -------------------------------------------------------------------------
-   * Load branches
-   * ----------------------------------------------------------------------- */
-
-  useEffect(() => {
-    apiFetchAuthed<BranchRow[]>(getAccessToken, "/branches")
-      .then((rows) => setBranches(Array.isArray(rows) ? rows : []))
-      .catch(() => setBranches([]));
-  }, [getAccessToken]);
-
-  const branchOptions = useMemo(() => {
-    return branches
-      .map((b) => ({
-        id: pickId(b),
-        label: b?.name ? `${b.name} (${pickId(b)})` : pickId(b),
-      }))
-      .filter((x) => x.id);
-  }, [branches]);
-
-  /* -------------------------------------------------------------------------
-   * Load settings for selected scope (edit mode)
-   * ----------------------------------------------------------------------- */
-
-  async function loadEditable() {
+  async function load() {
     setLoading(true);
-    setEffective(null);
-
     try {
-      if (scope === "GLOBAL") {
-        const global = await apiFetchAuthed<SettingsDoc>(
-          getAccessToken,
-          "/admin/settings/global"
-        );
-        setData({ ...DEFAULTS, ...global, scope: "GLOBAL" });
-        return;
-      }
-
-      const qs = new URLSearchParams();
-      if (branchId) qs.set("branchId", branchId);
-      if (canPickSubBranch && subBranchId) qs.set("subBranchId", subBranchId);
-
-      const eff = await apiFetchAuthed<SettingsDoc>(
+      // ✅ Siempre: mi sucursal
+      const me = await apiFetchAuthed<BranchDoc>(
         getAccessToken,
-        `/admin/settings/effective?${qs.toString()}`
+        "/branches/me"
       );
+      const meId = pickId(me);
+
+      setBranchMeta({ id: meId, name: me?.name || "Sucursal" });
 
       setData({
-        ...DEFAULTS,
-        ...eff,
-        scope,
+        ...DEFAULT_BRANCH,
+        ...me,
+        _id: me?._id ?? me?.id ?? DEFAULT_BRANCH._id,
+        schedule: normalizeWeekSchedule(me?.schedule),
       });
     } catch {
-      setData({ ...DEFAULTS, scope });
+      setBranchMeta(null);
+      setData({ ...DEFAULT_BRANCH });
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (canPickBranch && !branchId) {
-      setData(null);
-      setEffective(null);
-      return;
-    }
-
-    loadEditable();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, branchId, subBranchId, getAccessToken]);
+  }, [getAccessToken]);
 
-  /* -------------------------------------------------------------------------
-   * Mutations
-   * ----------------------------------------------------------------------- */
-
-  function update(key: keyof SettingsDoc, value: any) {
+  function update<K extends keyof BranchDoc>(key: K, value: BranchDoc[K]) {
     setData((d) => (d ? { ...d, [key]: value } : d));
+  }
+
+  function updateScheduleDay(
+    day: keyof WeekSchedule,
+    next: Partial<DaySchedule>
+  ) {
+    setData((d) => {
+      if (!d) return d;
+      return {
+        ...d,
+        schedule: {
+          ...d.schedule,
+          [day]: { ...d.schedule[day], ...next },
+        },
+      };
+    });
+  }
+
+  function addRange(day: keyof WeekSchedule) {
+    setData((d) => {
+      if (!d) return d;
+      const curr = d.schedule[day];
+      const nextRanges = [
+        ...(curr?.ranges ?? []),
+        { open: "09:00", close: "18:00" },
+      ];
+      return {
+        ...d,
+        schedule: { ...d.schedule, [day]: { ...curr, ranges: nextRanges } },
+      };
+    });
+  }
+
+  function updateRange(
+    day: keyof WeekSchedule,
+    idx: number,
+    patch: Partial<TimeRange>
+  ) {
+    setData((d) => {
+      if (!d) return d;
+      const curr = d.schedule[day];
+      const ranges = [...(curr?.ranges ?? [])];
+      const prev = ranges[idx] ?? { open: "09:00", close: "18:00" };
+      ranges[idx] = {
+        open: safeHHMM(patch.open ?? prev.open, prev.open),
+        close: safeHHMM(patch.close ?? prev.close, prev.close),
+      };
+      return {
+        ...d,
+        schedule: { ...d.schedule, [day]: { ...curr, ranges } },
+      };
+    });
+  }
+
+  function removeRange(day: keyof WeekSchedule, idx: number) {
+    setData((d) => {
+      if (!d) return d;
+      const curr = d.schedule[day];
+      const ranges = [...(curr?.ranges ?? [])];
+      ranges.splice(idx, 1);
+      return {
+        ...d,
+        schedule: { ...d.schedule, [day]: { ...curr, ranges } },
+      };
+    });
   }
 
   async function save() {
     if (!data) return;
-    if (canPickBranch && !branchId) return;
 
     setSaving(true);
     try {
-      await apiFetchAuthed(getAccessToken, "/admin/settings/scope", {
+      // ✅ Siempre: patch a mi sucursal
+      const payload = {
+        name: data.name,
+        description: data.description ?? null,
+        isActive: !!data.isActive,
+        address: data.address ?? null,
+        city: data.city ?? null,
+        postalCode: data.postalCode ?? null,
+        phone: data.phone ?? null,
+        whatsapp: data.whatsapp ?? null,
+        gps: data.gps ?? null,
+        timezone: data.timezone,
+        schedule: data.schedule,
+        notes: data.notes ?? null,
+      };
+
+      await apiFetchAuthed(getAccessToken, "/branches/me", {
         method: "PATCH",
-        body: JSON.stringify({
-          scope,
-          branchId: canPickBranch ? branchId : null,
-          subBranchId: canPickSubBranch ? subBranchId || null : null,
-          data: {
-            businessName: data.businessName,
-            currency: data.currency,
-            timezone: data.timezone,
-            trackStock: data.trackStock,
-            allowNegativeStock: data.allowNegativeStock,
-            stockAlertDays: data.stockAlertDays,
-            allowManualDiscount: data.allowManualDiscount,
-            paymentMethods: data.paymentMethods,
-            allowUserRegister: data.allowUserRegister,
-          },
-        }),
+        body: JSON.stringify(payload),
       });
 
-      await loadEditable();
+      await load();
     } finally {
       setSaving(false);
     }
   }
-
-  async function viewEffective() {
-    if (scope === "GLOBAL") {
-      setEffective(data);
-      return;
-    }
-    if (!branchId) return;
-
-    setViewingEffective(true);
-    try {
-      const qs = new URLSearchParams();
-      qs.set("branchId", branchId);
-      if (canPickSubBranch && subBranchId) qs.set("subBranchId", subBranchId);
-
-      const eff = await apiFetchAuthed<SettingsDoc>(
-        getAccessToken,
-        `/admin/settings/effective?${qs.toString()}`
-      );
-      setEffective(eff);
-    } finally {
-      setViewingEffective(false);
-    }
-  }
-
-  /* -------------------------------------------------------------------------
-   * UI
-   * ----------------------------------------------------------------------- */
 
   return (
     <AdminProtected>
@@ -243,13 +287,13 @@ export default function AdminSettingsPage() {
           </div>
 
           <div className="flex-1">
-            <h1 className="text-xl font-semibold">Admin / Settings</h1>
+            <h1 className="text-xl font-semibold">Settings / Sucursal</h1>
             <p className="text-sm text-neutral-500">
-              Configuración global y por sucursal / sub-sucursal
+              Editás únicamente los datos de tu sucursal.
             </p>
           </div>
 
-          <Button variant="secondary" onClick={loadEditable} disabled={loading}>
+          <Button variant="secondary" onClick={load} disabled={loading}>
             <RefreshCcw className="h-4 w-4 mr-2" />
             Recargar
           </Button>
@@ -259,99 +303,57 @@ export default function AdminSettingsPage() {
             Guardar
           </Button>
         </div>
- {/* Scope picker */}
+
+        {/* Branch meta (siempre visible) */}
         <Card>
-          <CardHeader title="Contexto (Scope)" />
+          <CardHeader title="Tu sucursal" />
           <CardBody>
-            <Field label="Scope">
-              <Select
-                value={scope}
-                onChange={(e) => {
-                  const next = e.target.value as SettingsScope;
-                  setScope(next);
-                  setEffective(null);
-                }}
-              >
-                <option value="GLOBAL">GLOBAL</option>
-                <option value="BRANCH">BRANCH</option>
-                <option value="SUBBRANCH">SUBBRANCH</option>
-              </Select>
-            </Field>
+            {!branchMeta ? (
+              <div className="text-sm text-neutral-500">
+                No se pudo cargar la sucursal.
+              </div>
+            ) : (
+              <div className="text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-neutral-500">Nombre:</span>
+                  <span className="font-medium">{branchMeta.name}</span>
+                </div>
 
-            <Field label="Branch" >
-              <Select
-                value={branchId}
-                onChange={(e) => setBranchId(e.target.value)}
-                disabled={!canPickBranch}
-              >
-                <option value="">{canPickBranch ? "Seleccionar..." : "—"}</option>
-                {branchOptions.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="text-neutral-500">ID:</span>
+                  <span className="font-mono text-xs">{branchMeta.id}</span>
+                </div>
 
-            <Field
-              label="SubBranch"
-            >
-              <Input
-                value={subBranchId}
-                onChange={(e) => setSubBranchId(e.target.value)}
-                placeholder={canPickSubBranch ? "Pegá el subBranchId..." : "—"}
-                disabled={!canPickSubBranch}
-              />
-            </Field>
-
-            <div className="md:col-span-3 flex justify-end">
-              <Button
-                variant="secondary"
-                onClick={viewEffective}
-                disabled={viewingEffective || loading || (!data && scope === "GLOBAL")}
-              >
-                <Eye className="h-4 w-4 mr-2" />
-                Ver settings efectivos
-              </Button>
-            </div>
+                <div className="mt-2 text-xs text-neutral-500">
+                  Esta página usa{" "}
+                  <span className="font-mono">/branches/me</span> para leer y
+                  guardar.
+                </div>
+              </div>
+            )}
           </CardBody>
         </Card>
 
-        {/* Editable settings */}
+        {/* Form */}
         <Card>
-          <CardHeader title="Configuración" />
+          <CardHeader title="Datos de la sucursal" />
           <CardBody>
             {!data ? (
-              <div className="text-sm text-neutral-500">
-                {canPickBranch && !branchId
-                  ? "Seleccioná una sucursal para editar settings en este scope."
-                  : "Cargando..."}
-              </div>
+              <div className="text-sm text-neutral-500">Cargando...</div>
             ) : (
               <>
-                {/* GENERAL */}
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="md:col-span-3">
                     <h3 className="text-sm font-semibold text-neutral-700">
-                      General
+                      Identidad / contacto
                     </h3>
                   </div>
 
-                  <Field label="Nombre del negocio">
+                  <Field label="Nombre">
                     <Input
-                      value={data.businessName ?? ""}
-                      onChange={(e) => update("businessName", e.target.value)}
+                      value={data.name ?? ""}
+                      onChange={(e) => update("name", e.target.value)}
                     />
-                  </Field>
-
-                  <Field label="Moneda">
-                    <Select
-                      value={data.currency ?? "ARS"}
-                      onChange={(e) => update("currency", e.target.value)}
-                    >
-                      <option value="ARS">ARS</option>
-                      <option value="USD">USD</option>
-                    </Select>
                   </Field>
 
                   <Field label="Timezone">
@@ -360,21 +362,12 @@ export default function AdminSettingsPage() {
                       onChange={(e) => update("timezone", e.target.value)}
                     />
                   </Field>
-                </div>
 
-                {/* STOCK */}
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="md:col-span-3">
-                    <h3 className="text-sm font-semibold text-neutral-700">
-                      Stock
-                    </h3>
-                  </div>
-
-                  <Field label="Controlar stock">
+                  <Field label="Activa">
                     <Select
-                      value={String(!!data.trackStock)}
+                      value={String(!!data.isActive)}
                       onChange={(e) =>
-                        update("trackStock", safeBool(e.target.value, true))
+                        update("isActive", safeBool(e.target.value, true))
                       }
                     >
                       <option value="true">Sí</option>
@@ -382,104 +375,170 @@ export default function AdminSettingsPage() {
                     </Select>
                   </Field>
 
-                  <Field label="Permitir stock negativo">
-                    <Select
-                      value={String(!!data.allowNegativeStock)}
-                      onChange={(e) =>
-                        update("allowNegativeStock", safeBool(e.target.value, false))
-                      }
-                    >
-                      <option value="false">No</option>
-                      <option value="true">Sí</option>
-                    </Select>
-                  </Field>
-
-                  <Field label="Días alerta stock">
+                  <Field label="Descripción">
                     <Input
-                      type="number"
-                      value={String(data.stockAlertDays ?? 5)}
-                      onChange={(e) =>
-                        update("stockAlertDays", safeNum(e.target.value, 5))
-                      }
+                      value={data.description ?? ""}
+                      onChange={(e) => update("description", e.target.value)}
+                      placeholder="Opcional"
+                    />
+                  </Field>
+
+                  <Field label="Dirección">
+                    <Input
+                      value={data.address ?? ""}
+                      onChange={(e) => update("address", e.target.value)}
+                    />
+                  </Field>
+
+                  <Field label="Ciudad">
+                    <Input
+                      value={data.city ?? ""}
+                      onChange={(e) => update("city", e.target.value)}
+                    />
+                  </Field>
+
+                  <Field label="CP">
+                    <Input
+                      value={data.postalCode ?? ""}
+                      onChange={(e) => update("postalCode", e.target.value)}
+                    />
+                  </Field>
+
+                  <Field label="Teléfono">
+                    <Input
+                      value={data.phone ?? ""}
+                      onChange={(e) => update("phone", e.target.value)}
+                    />
+                  </Field>
+
+                  <Field label="WhatsApp">
+                    <Input
+                      value={data.whatsapp ?? ""}
+                      onChange={(e) => update("whatsapp", e.target.value)}
+                    />
+                  </Field>
+
+                  <Field label="GPS (lat, lon)">
+                    <Input
+                      value={data.gps ?? ""}
+                      onChange={(e) => update("gps", e.target.value)}
+                      placeholder="-31.65, -64.43"
+                    />
+                  </Field>
+
+                  <Field label="Notas internas">
+                    <Input
+                      value={data.notes ?? ""}
+                      onChange={(e) => update("notes", e.target.value)}
                     />
                   </Field>
                 </div>
 
-                {/* POS */}
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="md:col-span-3">
+                {/* Schedule */}
+                <div className="mt-6">
+                  <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-neutral-700">
-                      POS / Ventas
+                      Horarios
                     </h3>
+                    <p className="text-xs text-neutral-500">
+                      Cada día puede tener múltiples rangos.
+                    </p>
                   </div>
 
-                  <Field label="Permitir descuento manual">
-                    <Select
-                      value={String(!!data.allowManualDiscount)}
-                      onChange={(e) =>
-                        update("allowManualDiscount", safeBool(e.target.value, true))
-                      }
-                    >
-                      <option value="true">Sí</option>
-                      <option value="false">No</option>
-                    </Select>
-                  </Field>
+                  <div className="mt-4 space-y-4">
+                    {(Object.keys(DAY_LABEL) as Array<keyof WeekSchedule>).map(
+                      (day) => {
+                        const d = data.schedule?.[day] ?? makeEmptyDay();
+                        return (
+                          <Card key={day}>
+                            <CardHeader title={DAY_LABEL[day]} />
+                            <CardBody>
+                              <div className="grid gap-3 md:grid-cols-3 items-end">
+                                <Field label="Habilitado">
+                                  <Select
+                                    value={String(!!d.enabled)}
+                                    onChange={(e) =>
+                                      updateScheduleDay(day, {
+                                        enabled: safeBool(e.target.value, true),
+                                      })
+                                    }
+                                  >
+                                    <option value="true">Sí</option>
+                                    <option value="false">No</option>
+                                  </Select>
+                                </Field>
 
-                  <Field label="Métodos de pago (CSV)">
-                    <Input
-                      value={(data.paymentMethods ?? []).join(",")}
-                      onChange={(e) =>
-                        update(
-                          "paymentMethods",
-                          e.target.value
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean)
-                        )
-                      }
-                      placeholder="CASH, TRANSFER, CARD"
-                    />
-                  </Field>
-                </div>
+                                <div className="md:col-span-2 flex justify-end">
+                                  <Button
+                                    variant="secondary"
+                                    onClick={() => addRange(day)}
+                                    disabled={!d.enabled}
+                                  >
+                                    + Agregar rango
+                                  </Button>
+                                </div>
 
-                {/* USERS */}
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="md:col-span-3">
-                    <h3 className="text-sm font-semibold text-neutral-700">
-                      Usuarios
-                    </h3>
+                                <div className="md:col-span-3 space-y-3">
+                                  {d.ranges.length === 0 ? (
+                                    <div className="text-sm text-neutral-500">
+                                      Sin rangos
+                                    </div>
+                                  ) : (
+                                    d.ranges.map((r, idx) => (
+                                      <div
+                                        key={`${day}-${idx}`}
+                                        className="grid gap-3 md:grid-cols-3 items-end"
+                                      >
+                                        <Field label="Open (HH:mm)">
+                                          <Input
+                                            value={r.open}
+                                            onChange={(e) =>
+                                              updateRange(day, idx, {
+                                                open: e.target.value,
+                                              })
+                                            }
+                                            placeholder="09:00"
+                                            disabled={!d.enabled}
+                                          />
+                                        </Field>
+
+                                        <Field label="Close (HH:mm)">
+                                          <Input
+                                            value={r.close}
+                                            onChange={(e) =>
+                                              updateRange(day, idx, {
+                                                close: e.target.value,
+                                              })
+                                            }
+                                            placeholder="18:00"
+                                            disabled={!d.enabled}
+                                          />
+                                        </Field>
+
+                                        <div className="flex justify-end">
+                                          <Button
+                                            variant="secondary"
+                                            onClick={() =>
+                                              removeRange(day, idx)
+                                            }
+                                            disabled={!d.enabled}
+                                          >
+                                            Quitar
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </CardBody>
+                          </Card>
+                        );
+                      }
+                    )}
                   </div>
-
-                  <Field label="Permitir registro de usuarios">
-                    <Select
-                      value={String(!!data.allowUserRegister)}
-                      onChange={(e) =>
-                        update("allowUserRegister", safeBool(e.target.value, false))
-                      }
-                    >
-                      <option value="false">No</option>
-                      <option value="true">Sí</option>
-                    </Select>
-                  </Field>
                 </div>
               </>
-            )}
-          </CardBody>
-        </Card>
-
-        {/* Effective preview */}
-        <Card>
-          <CardHeader title="Preview: Settings efectivos" />
-          <CardBody>
-            {!effective ? (
-              <div className="text-sm text-neutral-500">
-                Tocá “Ver settings efectivos” para ver el resultado final con
-                fallback (GLOBAL → BRANCH → SUBBRANCH).
-              </div>
-            ) : (
-              <pre className="text-xs bg-neutral-50 border rounded-2xl p-4 overflow-auto">
-                {JSON.stringify(effective, null, 2)}
-              </pre>
             )}
           </CardBody>
         </Card>

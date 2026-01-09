@@ -6,12 +6,15 @@ import { AdminProtected } from "@/components/AdminProtected";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
+import { useAuth } from "@/app/providers/AuthProvider"; // ✅ NUEVO
+
 import {
   FinanceAccountType,
   useCreateFinanceAccountMutation,
   useGetFinanceAccountsQuery,
   useUpdateFinanceAccountMutation,
 } from "@/redux/services/financeApi";
+
 import {
   RefreshCcw,
   Plus,
@@ -320,11 +323,14 @@ function AccountFormPanel({
  * ========================================================================== */
 
 export default function FinanceAccountsPage() {
+  const { user } = useAuth(); // ✅ NUEVO (ajustá según tu AuthProvider)
+  const branchId = String((user as any)?.branchId || ""); // ✅ NUEVO
+
   const [q, setQ] = useState("");
   const [type, setType] = useState<FinanceAccountType | "">("");
-  const [activeFilter, setActiveFilter] = useState<
-    "active" | "inactive" | "all"
-  >("active");
+  const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">(
+    "active"
+  );
 
   const qDebounced = useDebouncedValue(q, 300);
 
@@ -334,12 +340,14 @@ export default function FinanceAccountsPage() {
     return true;
   }, [activeFilter]);
 
+  // ✅ branchId lo mandamos SOLO si existe (por si tu financeApi lo usa)
   const { data, isLoading, isFetching, error, refetch } =
     useGetFinanceAccountsQuery({
+      branchId: branchId || undefined,
       q: qDebounced.trim() || undefined,
       type: (type || undefined) as any,
       active: activeParam,
-    });
+    } as any);
 
   const [createAccount, createState] = useCreateFinanceAccountMutation();
   const [updateAccount, updateState] = useUpdateFinanceAccountMutation();
@@ -405,6 +413,7 @@ export default function FinanceAccountsPage() {
     try {
       if (panelMode === "create") {
         await createAccount({
+          branchId: branchId || undefined, // ✅
           code: buildAccountCode(payload.name),
           name: payload.name,
           type: payload.type,
@@ -415,6 +424,7 @@ export default function FinanceAccountsPage() {
       } else {
         if (!payload.id) throw new Error("Falta id para editar");
         await updateAccount({
+          branchId: branchId || undefined, // ✅
           id: payload.id,
           code: buildAccountCode(payload.name),
           name: payload.name,
@@ -444,12 +454,14 @@ export default function FinanceAccountsPage() {
       return;
 
     try {
-      await updateAccount({ id: a.id, isActive: next } as any).unwrap();
+      await updateAccount({
+        branchId: branchId || undefined, // ✅
+        id: a.id,
+        isActive: next,
+      } as any).unwrap();
       refetch();
     } catch (e: any) {
-      alert(
-        e?.data?.message || e?.message || "No se pudo actualizar el estado."
-      );
+      alert(e?.data?.message || e?.message || "No se pudo actualizar el estado.");
     }
   }
 
@@ -497,6 +509,13 @@ export default function FinanceAccountsPage() {
                 <span className="rounded-full border px-3 py-1 text-xs font-semibold text-zinc-700">
                   Σ Inicial: {moneyARS(stats.sumOpening)}
                 </span>
+
+                {/* ✅ opcional: mostrar branchId (debug) */}
+                {/* {branchId ? (
+                  <span className="rounded-full border px-3 py-1 text-xs font-semibold text-zinc-700">
+                    Branch: {branchId}
+                  </span>
+                ) : null} */}
               </div>
             </div>
 
@@ -637,9 +656,7 @@ export default function FinanceAccountsPage() {
                       colSpan={7}
                       className="px-4 py-10 text-center text-sm text-zinc-500"
                     >
-                      {isLoading
-                        ? "Cargando cuentas…"
-                        : "No hay cuentas para mostrar."}
+                      {isLoading ? "Cargando cuentas…" : "No hay cuentas para mostrar."}
                     </td>
                   </tr>
                 ) : (
@@ -650,15 +667,10 @@ export default function FinanceAccountsPage() {
                     return (
                       <tr
                         key={a.id}
-                        className={cn(
-                          "hover:bg-zinc-50",
-                          !isActive && "opacity-60"
-                        )}
+                        className={cn("hover:bg-zinc-50", !isActive && "opacity-60")}
                       >
                         <td className="px-4 py-3">
-                          <div className="font-semibold text-zinc-900">
-                            {a.name}
-                          </div>
+                          <div className="font-semibold text-zinc-900">{a.name}</div>
                           <div className="text-xs text-zinc-500">{a.id}</div>
                         </td>
                         <td className="px-4 py-3">{typeBadge(a.type)}</td>
@@ -668,12 +680,7 @@ export default function FinanceAccountsPage() {
                           {moneyARS(opening)}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={cn(
-                              "text-zinc-700",
-                              !a.notes && "text-zinc-400"
-                            )}
-                          >
+                          <span className={cn("text-zinc-700", !a.notes && "text-zinc-400")}>
                             {a.notes || "—"}
                           </span>
                         </td>
