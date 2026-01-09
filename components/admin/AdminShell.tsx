@@ -84,7 +84,38 @@ export default function AdminShell({
 
   // ---------------- NAV ----------------
   const nav: NavItem[] = [
-    // 0) FINANCE (núcleo financiero)
+    {
+      type: "link",
+      href: "/admin",
+      label: "Dashboard",
+      roles: ["ADMIN", "MANAGER"],
+      icon: <LayoutDashboard className="h-4 w-4" />,
+    },
+    // 1) POS (lo más usado)
+    {
+      type: "group",
+      id: "pos",
+      label: "POS",
+      roles: ["ADMIN", "MANAGER", "CASHIER"],
+      icon: <ShoppingCart className="h-4 w-4" />,
+      children: [
+        {
+          type: "link",
+          href: "/admin/pos",
+          label: "Ventas (POS)",
+          roles: ["ADMIN", "MANAGER", "CASHIER"],
+          icon: <ShoppingCart className="h-4 w-4" />,
+        },
+        {
+          type: "link",
+          href: "/admin/orders",
+          label: "Órdenes / Pedidos",
+          roles: ["ADMIN", "MANAGER", "CASHIER"],
+          icon: <ClipboardList className="h-4 w-4" />,
+        },
+      ],
+    },
+    // 1) FINANCE (núcleo financiero)
     {
       type: "group",
       id: "finance",
@@ -130,39 +161,8 @@ export default function AdminShell({
       ],
     },
 
-    // 1) POS (lo más usado)
-    {
-      type: "group",
-      id: "pos",
-      label: "POS",
-      roles: ["ADMIN", "MANAGER", "CASHIER"],
-      icon: <ShoppingCart className="h-4 w-4" />,
-      children: [
-        {
-          type: "link",
-          href: "/admin/pos",
-          label: "Ventas (POS)",
-          roles: ["ADMIN", "MANAGER", "CASHIER"],
-          icon: <ShoppingCart className="h-4 w-4" />,
-        },
-        {
-          type: "link",
-          href: "/admin/orders",
-          label: "Órdenes / Pedidos",
-          roles: ["ADMIN", "MANAGER", "CASHIER"],
-          icon: <ClipboardList className="h-4 w-4" />,
-        },
-      ],
-    },
-
     // 2) Operación diaria
-    {
-      type: "link",
-      href: "/admin",
-      label: "Dashboard",
-      roles: ["ADMIN", "MANAGER"],
-      icon: <LayoutDashboard className="h-4 w-4" />,
-    },
+
     {
       type: "group",
       id: "operation",
