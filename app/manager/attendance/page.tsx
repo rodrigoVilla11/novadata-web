@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 
-// Opcional pero recomendado (si ya usás lucide-react)
 import {
   RefreshCcw,
   Search,
@@ -41,6 +40,10 @@ function todayKeyArgentina() {
   }).format(new Date());
 }
 
+function isValidDateKey(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 function fmtTime(dt?: string | null) {
   if (!dt) return "—";
   try {
@@ -66,7 +69,11 @@ function isValidUrl(url: string) {
 
 export default function AttendancePage() {
   const { getAccessToken, user } = useAuth() as any;
-  const roles: string[] = user?.roles || [];
+
+  // ✅ roles normalizados (evita "admin" / "Admin")
+  const roles: string[] = (user?.roles || []).map((r: any) =>
+    String(r).toUpperCase()
+  );
   const allowed = roles.includes("ADMIN") || roles.includes("MANAGER");
 
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
@@ -120,25 +127,42 @@ export default function AttendancePage() {
     });
   }, [rows, q, filterEmployeeId, onlyPendingCheckout, onlyWithNotes, employeeMap]);
 
+  const noEmployees = !loading && employees.length === 0;
+
+  const selectedRow = useMemo(() => {
+    if (!selectedEmployeeId) return null;
+    return rows.find((r) => r.employeeId === selectedEmployeeId) ?? null;
+  }, [rows, selectedEmployeeId]);
+
+  // ✅ checkout solo si hay checkin y no hay checkout
+  const canCheckout = !!selectedRow?.checkInAt && !selectedRow?.checkOutAt;
+
   async function loadAll(opts?: { keepSelection?: boolean }) {
     setError(null);
     setOkMsg(null);
     setLoading(true);
+
     try {
+      // ⚠️ IMPORTANTE: este endpoint debería estar filtrado por branchId del token en backend
       const emps = await apiFetchAuthed<EmployeeRow[]>(
         getAccessToken,
         "/employees?activeOnly=true"
       );
-      setEmployees(emps);
+      setEmployees(Array.isArray(emps) ? emps : []);
 
       const dayRows = await apiFetchAuthed<AttendanceRow[]>(
         getAccessToken,
         `/attendance/day/${encodeURIComponent(dateKey)}`
       );
-      setRows(dayRows);
+      setRows(Array.isArray(dayRows) ? dayRows : []);
 
+      // ✅ selección robusta
       if (!opts?.keepSelection) {
-        if (!selectedEmployeeId && emps[0]?.id) setSelectedEmployeeId(emps[0].id);
+        if (!selectedEmployeeId && emps?.[0]?.id) setSelectedEmployeeId(emps[0].id);
+      } else {
+        if (selectedEmployeeId && !(emps || []).some((e) => e.id === selectedEmployeeId)) {
+          setSelectedEmployeeId(emps?.[0]?.id ?? "");
+        }
       }
     } catch (e: any) {
       setError(e?.message || "Error cargando asistencia");
@@ -243,8 +267,7 @@ export default function AttendancePage() {
     );
   }
 
-  const hasFilters =
-    q.trim() || filterEmployeeId || onlyPendingCheckout || onlyWithNotes;
+  const hasFilters = q.trim() || filterEmployeeId || onlyPendingCheckout || onlyWithNotes;
 
   const selectedEmployeeLabel =
     employees.find((e) => e.id === selectedEmployeeId)?.fullName || "—";
@@ -297,13 +320,24 @@ export default function AttendancePage() {
                   Pendientes de check-out: <b>{stats.pendingCheckout}</b>
                 </div>
               )}
+
+              {noEmployees && (
+                <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <AlertTriangle className="h-4 w-4" />
+                  No hay empleados activos en esta sucursal.
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
               <Input
                 type="date"
                 value={dateKey}
-                onChange={(e) => setDateKey(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  // ✅ mini-guard por si el browser manda algo raro
+                  if (isValidDateKey(v)) setDateKey(v);
+                }}
               />
               <Button
                 variant="secondary"
@@ -338,16 +372,14 @@ export default function AttendancePage() {
       <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
         {/* Registrar */}
         <Card>
-          <CardHeader
-            title="Registrar"
-            subtitle="Seleccioná empleado y marcá entrada o salida."
-          />
+          <CardHeader title="Registrar" subtitle="Seleccioná empleado y marcá entrada o salida." />
           <CardBody>
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="Empleado">
                 <Select
                   value={selectedEmployeeId}
                   onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                  disabled={loading || noEmployees || busy}
                 >
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>
@@ -362,6 +394,7 @@ export default function AttendancePage() {
                   value={photoUrl}
                   onChange={(e) => setPhotoUrl(e.target.value)}
                   placeholder="https://..."
+                  disabled={noEmployees || busy}
                 />
                 {!!photoUrl.trim() && !photoLooksValid && (
                   <div className="mt-1 text-xs text-red-600">
@@ -375,6 +408,7 @@ export default function AttendancePage() {
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Ej: llegó tarde"
+                  disabled={noEmployees || busy}
                 />
               </Field>
 
@@ -382,7 +416,7 @@ export default function AttendancePage() {
                 <Button
                   className="w-full"
                   onClick={checkIn}
-                  disabled={busy || !selectedEmployeeId || !photoLooksValid}
+                  disabled={busy || noEmployees || !selectedEmployeeId || !photoLooksValid}
                   loading={busy}
                 >
                   Check-in
@@ -391,8 +425,16 @@ export default function AttendancePage() {
                   className="w-full"
                   variant="secondary"
                   onClick={checkOut}
-                  disabled={busy || !selectedEmployeeId || !photoLooksValid}
+                  // ✅ checkout solo si corresponde
+                  disabled={
+                    busy ||
+                    noEmployees ||
+                    !selectedEmployeeId ||
+                    !photoLooksValid ||
+                    !canCheckout
+                  }
                   loading={busy}
+                  title={!canCheckout ? "Primero registrá check-in (y que no tenga checkout)." : ""}
                 >
                   Check-out
                 </Button>
@@ -403,12 +445,18 @@ export default function AttendancePage() {
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm text-zinc-600">
                 Seleccionado: <b className="text-zinc-900">{selectedEmployeeLabel}</b>
+                {selectedRow?.checkInAt && (
+                  <span className="ml-2 text-xs text-zinc-500">
+                    (Entrada: <b className="text-zinc-800">{fmtTime(selectedRow.checkInAt)}</b>)
+                  </span>
+                )}
               </div>
 
               {!!photoUrl.trim() && photoLooksValid && (
                 <a
                   href={photoUrl.trim()}
                   target="_blank"
+                  rel="noreferrer"
                   className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline"
                 >
                   <Camera className="h-4 w-4" />
@@ -422,10 +470,7 @@ export default function AttendancePage() {
 
         {/* Filtros */}
         <Card>
-          <CardHeader
-            title="Filtros"
-            subtitle="Buscá rápido y detectá pendientes."
-          />
+          <CardHeader title="Filtros" subtitle="Buscá rápido y detectá pendientes." />
           <CardBody>
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="Buscar (texto)">
@@ -436,6 +481,7 @@ export default function AttendancePage() {
                     onChange={(e) => setQ(e.target.value)}
                     placeholder="Empleado o notas…"
                     className="pl-9"
+                    disabled={loading}
                   />
                 </div>
               </Field>
@@ -444,6 +490,7 @@ export default function AttendancePage() {
                 <Select
                   value={filterEmployeeId}
                   onChange={(e) => setFilterEmployeeId(e.target.value)}
+                  disabled={loading}
                 >
                   <option value="">Todos</option>
                   {employees.map((e) => (
@@ -473,7 +520,7 @@ export default function AttendancePage() {
 
               <div className="flex items-end justify-end">
                 {hasFilters && (
-                  <Button variant="secondary" onClick={resetFilters}>
+                  <Button variant="secondary" onClick={resetFilters} disabled={loading}>
                     <span className="inline-flex items-center gap-2">
                       <X className="h-4 w-4" />
                       Limpiar
@@ -561,13 +608,9 @@ export default function AttendancePage() {
                           )}
                         </td>
 
-                        <td className="px-4 py-3 text-sm text-zinc-700">
-                          {fmtTime(r.checkInAt)}
-                        </td>
+                        <td className="px-4 py-3 text-sm text-zinc-700">{fmtTime(r.checkInAt)}</td>
 
-                        <td className="px-4 py-3 text-sm text-zinc-700">
-                          {fmtTime(r.checkOutAt)}
-                        </td>
+                        <td className="px-4 py-3 text-sm text-zinc-700">{fmtTime(r.checkOutAt)}</td>
 
                         <td className="px-4 py-3 text-sm text-zinc-700">
                           <div className="flex flex-col gap-1">
@@ -637,9 +680,7 @@ export default function AttendancePage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-zinc-900 truncate">
-                          {emp}
-                        </div>
+                        <div className="text-sm font-semibold text-zinc-900 truncate">{emp}</div>
                         <div className="mt-2 flex flex-wrap gap-2 text-xs">
                           <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-700">
                             Entrada: <b className="text-zinc-900">{fmtTime(r.checkInAt)}</b>

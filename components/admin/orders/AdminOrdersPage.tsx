@@ -7,7 +7,13 @@ import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
-import { ClipboardList, RefreshCcw, Search, XCircle, BadgeCheck } from "lucide-react";
+import {
+  ClipboardList,
+  RefreshCcw,
+  Search,
+  XCircle,
+  BadgeCheck,
+} from "lucide-react";
 
 import { Notice } from "./Notice";
 import { OrderDrawer } from "./OrderDrawer";
@@ -29,20 +35,41 @@ import type { OrderPaidMeta, OrderRow } from "@/lib/adminOrders/types";
  * Page: Admin Orders
  * ========================================================================== */
 
+/**
+ * ✅ IMPORTANTE:
+ * - Quitamos DELIVERED porque NO existe en el enum backend (OrderStatus).
+ * - El paidMap lo armamos con ventas filtradas por "from/to" por defecto (últimos 30 días),
+ *   para evitar traer “cualquier cosa” y además darle chances a mapear pedidos listados.
+ *
+ * Si tu /sales todavía no soporta from/to, podés:
+ *   - dejar solo `limit=500`
+ *   - o mejor: crear endpoint /sales/paid-map?orderIds=...
+ */
+
 const STATUS_TABS = [
   { key: "", label: "Todos" },
   { key: "DRAFT", label: "Borrador" },
+  { key: "PENDING", label: "Pendientes" },
   { key: "ACCEPTED", label: "Aceptados" },
   { key: "REJECTED", label: "Rechazados" },
   { key: "CANCELLED", label: "Cancelados" },
-  { key: "DELIVERED", label: "Entregados" },
 ];
+
+function isoDate(d: Date) {
+  // YYYY-MM-DD
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+}
 
 export default function AdminOrdersPage() {
   const { getAccessToken, user } = useAuth();
   const roles = (user?.roles ?? []).map((r: any) => String(r).toUpperCase());
   const canUse =
-    roles.includes("ADMIN") || roles.includes("MANAGER") || roles.includes("CASHIER");
+    roles.includes("ADMIN") ||
+    roles.includes("MANAGER") ||
+    roles.includes("CASHIER");
 
   const [status, setStatus] = useState<string>("");
   const [fulfillment, setFulfillment] = useState<string>("");
@@ -62,10 +89,25 @@ export default function AdminOrdersPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   async function loadSalesPaidMap() {
-    // Traemos ventas recientes y armamos mapa orderId -> sale
-    // (si necesitás “por día”, lo ajustamos con from/to)
+    /**
+     * Traemos ventas recientes y armamos mapa orderId -> sale meta.
+     * Asumimos que el backend filtra por branch vía req.user (lo ideal).
+     *
+     * Para mejorar precisión:
+     * - pedimos ventas de los últimos 30 días (from/to),
+     * - y limit alto (500).
+     */
     try {
-      const rows = await apiFetchAuthed<any[]>(getAccessToken, `/sales?limit=200`);
+      const to = new Date();
+      const from = new Date();
+      from.setDate(from.getDate() - 30);
+
+      const qs = new URLSearchParams();
+      qs.set("limit", "500");
+      qs.set("from", isoDate(from));
+      qs.set("to", isoDate(to));
+
+      const rows = await apiFetchAuthed<any[]>(getAccessToken, `/sales?${qs.toString()}`);
 
       const map: Record<string, OrderPaidMeta> = {};
       for (const s of rows ?? []) {
@@ -80,7 +122,6 @@ export default function AdminOrdersPage() {
         const saleStatus = String(s?.status ?? "");
         const paidAt = s?.paidAt ?? s?.paid_at ?? null;
 
-        // si hay varias, preferimos PAID
         const prev = map[orderId];
         if (!prev) {
           map[orderId] = { saleId, saleStatus, paidAt };
@@ -90,9 +131,9 @@ export default function AdminOrdersPage() {
           if (!prevPaid && nowPaid) map[orderId] = { saleId, saleStatus, paidAt };
         }
       }
+
       setPaidMap(map);
     } catch {
-      // si falla, no rompemos la pantalla
       setPaidMap({});
     }
   }
@@ -100,6 +141,7 @@ export default function AdminOrdersPage() {
   async function loadOrders() {
     setErr(null);
     setLoading(true);
+
     try {
       const qs = new URLSearchParams();
       if (status) qs.set("status", status);
@@ -107,7 +149,10 @@ export default function AdminOrdersPage() {
       if (q.trim()) qs.set("q", q.trim());
       qs.set("limit", String(limit || 50));
 
-      const res = await apiFetchAuthed<any[]>(getAccessToken, `/orders?${qs.toString()}`);
+      const res = await apiFetchAuthed<any[]>(
+        getAccessToken,
+        `/orders?${qs.toString()}`
+      );
 
       const norm: OrderRow[] = (res ?? []).map((o: any) => ({
         id: String(o.id ?? o._id),
@@ -130,7 +175,7 @@ export default function AdminOrdersPage() {
 
       setOrders(norm);
 
-      // refrescamos paidMap en paralelo (no bloquea UI)
+      // paidMap en paralelo
       loadSalesPaidMap().catch(() => {});
     } catch (e: any) {
       const msg = String(e?.message || "Error cargando pedidos");
@@ -145,6 +190,7 @@ export default function AdminOrdersPage() {
     setBusy(true);
     setOk(null);
     setErr(null);
+
     try {
       await loadOrders();
       setOk("Actualizado ✔");
@@ -278,7 +324,7 @@ export default function AdminOrdersPage() {
                   className="pl-9"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Nombre, tel, nota…"
+                  placeholder="ID, nombre, tel, nota… (según backend)"
                   disabled={!canUse}
                 />
               </div>

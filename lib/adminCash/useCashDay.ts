@@ -14,12 +14,20 @@ type UseCashDayArgs = {
   dateKey: string;
   getAccessToken: () => Promise<string | null>;
   isAdmin: boolean;
+  branchId?: string | null; // ✅ NUEVO (si viene, lo usamos)
 };
+
+function withBranchQuery(url: string, branchId?: string | null) {
+  if (!branchId) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}branchId=${encodeURIComponent(branchId)}`;
+}
 
 export function useCashDay({
   dateKey,
   getAccessToken,
   isAdmin,
+  branchId,
 }: UseCashDayArgs) {
   const [day, setDay] = useState<CashDay | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
@@ -62,6 +70,9 @@ export function useCashDay({
   const [voidTarget, setVoidTarget] = useState<CashMovement | null>(null);
   const [voidReasonDraft, setVoidReasonDraft] = useState("");
 
+  // ✅ branch efectiva: solo si viene (normalmente: admin)
+  const effectiveBranchId = branchId ? String(branchId) : null;
+
   const canWrite = useMemo(() => day?.status === "OPEN", [day]);
 
   const activeCategories = useMemo(
@@ -87,14 +98,15 @@ export function useCashDay({
   }
 
   async function ensureDay(): Promise<CashDay> {
-    const d = await apiFetchAuthed<CashDay>(
-      getAccessToken,
-      "/cash/day/get-or-create",
-      {
-        method: "POST",
-        body: JSON.stringify({ dateKey }),
-      }
-    );
+    // POST /cash/day/get-or-create  body: { dateKey, branchId? }
+    const body: any = { dateKey };
+    if (effectiveBranchId) body.branchId = effectiveBranchId;
+
+    const d = await apiFetchAuthed<CashDay>(getAccessToken, "/cash/day/get-or-create", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
     setDay(d);
     return d;
   }
@@ -108,10 +120,13 @@ export function useCashDay({
   }
 
   async function loadSummary() {
-    const s = await apiFetchAuthed<CashSummary>(
-      getAccessToken,
-      `/cash/summary?dateKey=${encodeURIComponent(dateKey)}`
+    // GET /cash/summary?dateKey=...&branchId=...
+    const url = withBranchQuery(
+      `/cash/summary?dateKey=${encodeURIComponent(dateKey)}`,
+      effectiveBranchId
     );
+
+    const s = await apiFetchAuthed<CashSummary>(getAccessToken, url);
     setSummary(s);
     setDay(s.day);
   }
@@ -126,6 +141,7 @@ export function useCashDay({
     try {
       await loadCategories();
       const d = await ensureDay();
+
       await Promise.all([loadMovements(d.id), loadSummary()]);
 
       if (reqId !== reqIdRef.current) return;
@@ -144,7 +160,7 @@ export function useCashDay({
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateKey]);
+  }, [dateKey, effectiveBranchId]);
 
   async function refresh() {
     setBusy(true);
@@ -174,10 +190,14 @@ export function useCashDay({
     setBusy(true);
     setErr(null);
     try {
+      const body: any = { dateKey, openingCash: n };
+      if (effectiveBranchId) body.branchId = effectiveBranchId;
+
       await apiFetchAuthed(getAccessToken, "/cash/day/open", {
         method: "POST",
-        body: JSON.stringify({ dateKey, openingCash: n }),
+        body: JSON.stringify(body),
       });
+
       setOpenOpenModal(false);
       await refresh();
       setOk("Apertura actualizada ✔");
@@ -306,14 +326,17 @@ export function useCashDay({
     setErr(null);
 
     try {
+      const body: any = {
+        dateKey,
+        countedCash: counted,
+        adminOverride,
+        note: closeNote,
+      };
+      if (effectiveBranchId) body.branchId = effectiveBranchId;
+
       await apiFetchAuthed(getAccessToken, "/cash/day/close", {
         method: "POST",
-        body: JSON.stringify({
-          dateKey,
-          countedCash: counted,
-          adminOverride,
-          note: closeNote,
-        }),
+        body: JSON.stringify(body),
       });
 
       setCountedCash("");
@@ -345,9 +368,7 @@ export function useCashDay({
       }
 
       if (!qq) return true;
-      const hay = `${m.concept || ""} ${m.note || ""} ${m.method} ${
-        m.type
-      }`.toLowerCase();
+      const hay = `${m.concept || ""} ${m.note || ""} ${m.method} ${m.type}`.toLowerCase();
       const cat = m.categoryId ? categoryNameById.get(m.categoryId) || "" : "";
       return hay.includes(qq) || cat.toLowerCase().includes(qq);
     });

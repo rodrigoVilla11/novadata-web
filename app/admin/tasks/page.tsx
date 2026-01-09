@@ -31,6 +31,7 @@ type TaskRow = {
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
+  branchId?: string | null; // (opcional) si backend lo devuelve
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -120,6 +121,8 @@ export default function AdminTasksPage() {
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
 
+  const [areaFilter, setAreaFilter] = useState(""); // NEW (filtro exacto backend)
+
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -146,18 +149,27 @@ export default function AdminTasksPage() {
     window.setTimeout(() => setOk(null), 1500);
   }
 
-  // Debounce búsqueda
+  // Debounce búsqueda local
   useEffect(() => {
     const t = window.setTimeout(() => setQ(qRaw.trim()), 150);
     return () => window.clearTimeout(t);
   }, [qRaw]);
+
+  function buildListUrl() {
+    const sp = new URLSearchParams();
+    if (onlyActive) sp.set("activeOnly", "true");
+    if (areaFilter.trim()) sp.set("area", areaFilter.trim());
+    const qs = sp.toString();
+    return qs ? `/tasks?${qs}` : "/tasks";
+  }
 
   async function load(opts?: { silentOk?: boolean }) {
     setError(null);
     if (!opts?.silentOk) setOk(null);
     setLoadingList(true);
     try {
-      const data = await apiFetchAuthed<TaskRow[]>(getAccessToken, "/tasks");
+      const url = buildListUrl(); // NEW
+      const data = await apiFetchAuthed<TaskRow[]>(getAccessToken, url);
       setItems(Array.isArray(data) ? data : []);
       if (!opts?.silentOk) flashOk("Datos actualizados ✔");
     } catch (e: any) {
@@ -167,24 +179,32 @@ export default function AdminTasksPage() {
     }
   }
 
+  // inicial
   useEffect(() => {
     load({ silentOk: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // NEW: recargar cuando cambian filtros backend
+  useEffect(() => {
+    load({ silentOk: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyActive, areaFilter]);
 
   // Atajos: "/" enfoca buscar, "Esc" limpia/cancela
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as any)?.tagName?.toLowerCase?.();
       const inInput =
-        tag === "input" || tag === "textarea" || (e.target as any)?.isContentEditable;
+        tag === "input" ||
+        tag === "textarea" ||
+        (e.target as any)?.isContentEditable;
 
       if (!inInput && e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
       }
       if (e.key === "Escape") {
-        // si estaba editando, cancela; si no, limpia búsqueda
         if (editingId) cancelEdit();
         else if (qRaw) setQRaw("");
       }
@@ -200,11 +220,10 @@ export default function AdminTasksPage() {
     return { total, active, inactive };
   }, [items]);
 
+  // Client-side search + sort (sobre lo que ya filtró backend)
   const filteredSorted = useMemo(() => {
     const qq = q.toLowerCase();
     let base = items;
-
-    if (onlyActive) base = base.filter((t) => t.isActive);
 
     if (qq) {
       base = base.filter(
@@ -219,12 +238,11 @@ export default function AdminTasksPage() {
     const sorted = [...base].sort((a, b) => {
       if (sortKey === "name") return dir * cmpStr(a.name, b.name);
       if (sortKey === "area") return dir * cmpStr(a.area ?? "", b.area ?? "");
-      // estado: activas primero si asc
       return dir * (Number(b.isActive) - Number(a.isActive));
     });
 
     return sorted;
-  }, [items, onlyActive, q, sortKey, sortDir]);
+  }, [items, q, sortKey, sortDir]);
 
   function toggleSort(key: SortKey) {
     if (sortKey !== key) {
@@ -255,7 +273,6 @@ export default function AdminTasksPage() {
     setOk(null);
     setBusy(true);
 
-    // optimistic: agrega fila temporal
     const tempId = `tmp_${Date.now()}`;
     const optimistic: TaskRow = {
       id: tempId,
@@ -279,7 +296,6 @@ export default function AdminTasksPage() {
       flashOk("Tarea creada ✔");
       await load({ silentOk: true });
     } catch (e: any) {
-      // rollback optimistic
       setItems((prev) => prev.filter((x) => x.id !== tempId));
       setError(e?.message || "Error creando tarea");
     } finally {
@@ -295,7 +311,6 @@ export default function AdminTasksPage() {
     setOk(null);
     setBusy(true);
 
-    // optimistic update
     const prev = items;
     setItems((curr) =>
       curr.map((t) =>
@@ -318,7 +333,7 @@ export default function AdminTasksPage() {
       flashOk("Tarea actualizada ✔");
       await load({ silentOk: true });
     } catch (e: any) {
-      setItems(prev); // rollback
+      setItems(prev);
       setError(e?.message || "Error actualizando tarea");
     } finally {
       setBusy(false);
@@ -336,9 +351,10 @@ export default function AdminTasksPage() {
     setOk(null);
     setBusy(true);
 
-    // optimistic
     const prev = items;
-    setItems((curr) => curr.map((x) => (x.id === t.id ? { ...x, isActive: next } : x)));
+    setItems((curr) =>
+      curr.map((x) => (x.id === t.id ? { ...x, isActive: next } : x))
+    );
 
     try {
       await apiFetchAuthed(getAccessToken, `/tasks/${t.id}/active`, {
@@ -349,7 +365,7 @@ export default function AdminTasksPage() {
       flashOk(next ? "Tarea reactivada ✔" : "Tarea desactivada ✔");
       await load({ silentOk: true });
     } catch (e: any) {
-      setItems(prev); // rollback
+      setItems(prev);
       setError(e?.message || "Error cambiando estado");
     } finally {
       setBusy(false);
@@ -425,7 +441,7 @@ export default function AdminTasksPage() {
 
         {/* Filters */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+          <div className="grid gap-3 sm:grid-cols-[1fr_220px_auto_auto] sm:items-center">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Input
@@ -445,6 +461,14 @@ export default function AdminTasksPage() {
                 </button>
               )}
             </div>
+
+            {/* NEW: filtro por área exacto (backend) */}
+            <Input
+              value={areaFilter}
+              onChange={(e) => setAreaFilter(e.target.value)}
+              placeholder="Filtrar área (ej: Cocina)"
+              title="Filtra por área exacta (backend)"
+            />
 
             <button
               type="button"
@@ -478,7 +502,15 @@ export default function AdminTasksPage() {
 
               <button
                 type="button"
-                onClick={() => toggleSort(sortKey === "name" ? "area" : sortKey === "area" ? "isActive" : "name")}
+                onClick={() =>
+                  toggleSort(
+                    sortKey === "name"
+                      ? "area"
+                      : sortKey === "area"
+                      ? "isActive"
+                      : "name"
+                  )
+                }
                 className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 inline-flex items-center gap-2"
                 title="Cambiar criterio"
               >
@@ -588,9 +620,6 @@ export default function AdminTasksPage() {
                   <Button
                     onClick={() => {
                       setCreateOpen(true);
-                      window.setTimeout(() => {
-                        // intenta enfocar nombre (sin ref, pero al menos abre)
-                      }, 0);
                     }}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -603,6 +632,7 @@ export default function AdminTasksPage() {
                     onClick={() => {
                       setQRaw("");
                       setOnlyActive(false);
+                      setAreaFilter(""); // NEW
                       setSortKey("name");
                       setSortDir("asc");
                     }}
@@ -623,7 +653,8 @@ export default function AdminTasksPage() {
                       title="Ordenar por nombre"
                     >
                       <span className="inline-flex items-center gap-2">
-                        Nombre {sortKey === "name" && (sortDir === "asc" ? "↑" : "↓")}
+                        Nombre{" "}
+                        {sortKey === "name" && (sortDir === "asc" ? "↑" : "↓")}
                       </span>
                     </th>
                     <th
@@ -632,7 +663,8 @@ export default function AdminTasksPage() {
                       title="Ordenar por área"
                     >
                       <span className="inline-flex items-center gap-2">
-                        Área {sortKey === "area" && (sortDir === "asc" ? "↑" : "↓")}
+                        Área{" "}
+                        {sortKey === "area" && (sortDir === "asc" ? "↑" : "↓")}
                       </span>
                     </th>
                     <th
@@ -642,7 +674,8 @@ export default function AdminTasksPage() {
                     >
                       <span className="inline-flex items-center gap-2">
                         Estado{" "}
-                        {sortKey === "isActive" && (sortDir === "asc" ? "↑" : "↓")}
+                        {sortKey === "isActive" &&
+                          (sortDir === "asc" ? "↑" : "↓")}
                       </span>
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">

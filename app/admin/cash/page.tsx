@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { todayKeyArgentina } from "@/lib/adminCash/cashUtils";
 import { useCashDay } from "@/lib/adminCash/useCashDay";
+
 import CashHeader from "@/components/admin/cash/CashHeader";
 import CashSummaryCards from "@/components/admin/cash/CashSummaryCards";
 import CashMovementForm from "@/components/admin/cash/CashMovementForm";
@@ -15,13 +16,33 @@ import CloseCashModal from "@/components/admin/cash/CloseCashModal";
 import VoidMovementModal from "@/components/admin/cash/VoidMovementModal";
 
 export default function AdminCashPage() {
-  const { getAccessToken, user } = useAuth();
-  const roles = (user?.roles ?? []).map((r: any) => String(r).toUpperCase());
+  const { getAccessToken, user } = useAuth() as any;
+
+  const roles = useMemo(
+    () => (user?.roles ?? []).map((r: any) => String(r).toUpperCase()),
+    [user?.roles]
+  );
   const isAdmin = roles.includes("ADMIN");
+
+  // ✅ branchId desde JWT/payload
+  const branchIdFromUser = useMemo(() => {
+    const b = user?.branchId ?? null;
+    return b ? String(b) : null;
+  }, [user?.branchId]);
 
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
 
-  const cash = useCashDay({ dateKey, getAccessToken, isAdmin });
+  /**
+   * ✅ Recomendación:
+   * - No-admin: branchId = null (NO se manda al backend)
+   * - Admin: podés mandar branchId si querés filtrar por sucursal (si luego agregás selector)
+   */
+  const cash = useCashDay({
+    dateKey,
+    getAccessToken,
+    isAdmin,
+    branchId: isAdmin ? branchIdFromUser : null,
+  });
 
   return (
     <AdminProtected>
