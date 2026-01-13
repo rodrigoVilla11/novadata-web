@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
@@ -8,7 +9,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { RefreshCcw } from "lucide-react";
 
-/* ============================================================================
+/* =============================================================================
  * Types
  * ========================================================================== */
 
@@ -46,7 +47,7 @@ type AttendanceRow = {
 
 type Period = "day" | "week" | "biweek" | "month" | "custom";
 
-/* ============================================================================
+/* =============================================================================
  * Helpers
  * ========================================================================== */
 
@@ -68,6 +69,16 @@ function moneyARS(n: number) {
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS" });
 }
 
+function moneyARSNoCents(n: number) {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 function hoursFmt(h: number) {
   if (!Number.isFinite(h)) return "—";
   return `${(Math.round(h * 100) / 100).toLocaleString("es-AR")} h`;
@@ -85,6 +96,15 @@ function fmtShort(iso?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function isValidDateKey(s?: string | null) {
+  if (!s) return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function clampDateKey(s: string, fallback: string) {
+  return isValidDateKey(s) ? s : fallback;
 }
 
 function getRangeForPeriod(period: Period, baseDateKey: string) {
@@ -137,7 +157,15 @@ function getRangeForPeriod(period: Period, baseDateKey: string) {
   return { from: baseDateKey, to: baseDateKey };
 }
 
-/* ============================================================================
+function ErrorBox({ msg }: { msg: string }) {
+  return (
+    <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      {msg}
+    </div>
+  );
+}
+
+/* =============================================================================
  * Page
  * ========================================================================== */
 
@@ -153,7 +181,7 @@ export default function AdminAttendancesPage() {
     return m;
   }, [employees]);
 
-  // global filters (resumen)
+  // global filters (aplican al resumen)
   const [onlyActive, setOnlyActive] = useState(true);
   const [employeeId, setEmployeeId] = useState("");
   const [q, setQ] = useState("");
@@ -175,8 +203,16 @@ export default function AdminAttendancesPage() {
   const [busy, setBusy] = useState(false);
 
   const range = useMemo(() => {
-    if (period === "custom") return { from: customFrom, to: customTo };
-    return getRangeForPeriod(period, baseDate);
+    const safeBase = clampDateKey(baseDate, todayKeyArgentina());
+    const safeFrom = clampDateKey(customFrom, todayKeyArgentina());
+    const safeTo = clampDateKey(customTo, todayKeyArgentina());
+
+    if (period === "custom") {
+      // si están invertidas, las acomodamos
+      if (safeFrom > safeTo) return { from: safeTo, to: safeFrom };
+      return { from: safeFrom, to: safeTo };
+    }
+    return getRangeForPeriod(period, safeBase);
   }, [period, baseDate, customFrom, customTo]);
 
   const employeeOptions = useMemo(() => {
@@ -192,14 +228,13 @@ export default function AdminAttendancesPage() {
   }, [summary, q]);
 
   const dayRowsView = useMemo(() => {
-    // agregamos employeeName desde employeesById
     return dayRows.map((r) => ({
       ...r,
       employeeName: employeesById.get(r.employeeId)?.fullName ?? null,
     }));
   }, [dayRows, employeesById]);
 
-  /* ============================================================================
+  /* =============================================================================
    * Loaders
    * ========================================================================== */
 
@@ -239,9 +274,10 @@ export default function AdminAttendancesPage() {
     setDayLoading(true);
     setError(null);
     try {
+      const dk = clampDateKey(dateKey, todayKeyArgentina());
       const data = await apiFetchAuthed<AttendanceRow[]>(
         getAccessToken,
-        `/attendance/day/${encodeURIComponent(dateKey)}`
+        `/attendance/day/${encodeURIComponent(dk)}`
       );
       setDayRows(Array.isArray(data) ? data : []);
     } catch (e: any) {
@@ -257,9 +293,10 @@ export default function AdminAttendancesPage() {
     setError(null);
     try {
       await loadEmployees();
-      // refrescamos lo visible
       if (tab === "summary") await loadSummary();
       if (tab === "day") await loadDay();
+    } catch (e: any) {
+      setError(e?.message || "Error actualizando");
     } finally {
       setBusy(false);
     }
@@ -272,8 +309,10 @@ export default function AdminAttendancesPage() {
       setError(null);
       try {
         await loadEmployees();
-        // carga inicial de ambos para que al cambiar tab ya haya data
+        // precarga ambos para que al cambiar tab ya haya data
         await Promise.all([loadSummary(), loadDay()]);
+      } catch (e: any) {
+        setError(e?.message || "Error inicializando asistencias");
       } finally {
         setBusy(false);
       }
@@ -281,268 +320,332 @@ export default function AdminAttendancesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // auto refresh summary solo si tab summary
+  // auto refresh summary
   useEffect(() => {
     if (tab !== "summary") return;
     loadSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, range.from, range.to, employeeId, onlyActive]);
 
-  // auto refresh day solo si tab day
+  // auto refresh day
   useEffect(() => {
     if (tab !== "day") return;
     loadDay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, dateKey]);
 
-  /* ============================================================================
+  /* =============================================================================
    * Render
    * ========================================================================== */
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Asistencias
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Control de horas trabajadas y cálculo de pagos.
-        </p>
+    <AdminProtected>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+            Asistencias
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Control de horas trabajadas y cálculo de pagos.
+          </p>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button
-            variant={tab === "summary" ? "primary" : "secondary"}
-            onClick={() => setTab("summary")}
-          >
-            Resumen / Payroll
-          </Button>
-          <Button
-            variant={tab === "day" ? "primary" : "secondary"}
-            onClick={() => setTab("day")}
-          >
-            Detalle del día
-          </Button>
-          <Button variant="secondary" onClick={refreshAll} loading={busy}>
-            <RefreshCcw className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Shared filters */}
-      <Card>
-        <CardHeader title="Filtros globales" subtitle="Aplican al resumen." />
-        <CardBody>
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field label="Empleado">
-              <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-                <option value="">Todos</option>
-                {employeeOptions.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.fullName}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
-            <Field label="Empleados">
-              <Select
-                value={onlyActive ? "active" : "all"}
-                onChange={(e) => setOnlyActive(e.target.value === "active")}
-              >
-                <option value="active">Solo activos</option>
-                <option value="all">Todos</option>
-              </Select>
-            </Field>
-
-            <Field label="Buscar (Resumen)">
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nombre…" />
-            </Field>
-
-            <div className="flex items-end">
-              <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                <div className="text-xs text-zinc-500">Rango</div>
-                <div className="mt-1 text-sm font-semibold text-zinc-900">
-                  {range.from} → {range.to}
-                </div>
-              </div>
-            </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              variant={tab === "summary" ? "primary" : "secondary"}
+              onClick={() => setTab("summary")}
+            >
+              Resumen
+            </Button>
+            <Button
+              variant={tab === "day" ? "primary" : "secondary"}
+              onClick={() => setTab("day")}
+            >
+              Detalle del día
+            </Button>
+            <Button variant="secondary" onClick={refreshAll} loading={busy}>
+              <RefreshCcw className="h-4 w-4" />
+            </Button>
           </div>
-        </CardBody>
-      </Card>
+        </div>
 
-      {/* SUMMARY */}
-      {tab === "summary" && (
-        <>
-          <Card>
-            <CardHeader title="Periodo" />
-            <CardBody>
-              <div className="grid gap-3 md:grid-cols-5">
-                <Field label="Tipo">
-                  <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
-                    <option value="day">Día</option>
-                    <option value="week">Semana</option>
-                    <option value="biweek">Quincena</option>
-                    <option value="month">Mes</option>
-                    <option value="custom">Custom</option>
-                  </Select>
-                </Field>
+        {error && <ErrorBox msg={error} />}
 
-                {period !== "custom" ? (
-                  <Field label="Fecha base">
-                    <Input type="date" value={baseDate} onChange={(e) => setBaseDate(e.target.value)} />
-                  </Field>
-                ) : (
-                  <>
-                    <Field label="Desde">
-                      <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
-                    </Field>
-                    <Field label="Hasta">
-                      <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-                    </Field>
-                  </>
-                )}
+        {/* Shared filters */}
+        <Card>
+          <CardHeader title="Filtros globales" subtitle="Aplican al resumen." />
+          <CardBody>
+            <div className="grid gap-3 md:grid-cols-4">
+              <Field label="Empleado">
+                <Select
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {employeeOptions.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.fullName}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
 
-                <div className="md:col-span-2 flex items-end">
-                  <div className="w-full rounded-2xl border border-zinc-200 bg-white p-4">
-                    <div className="text-xs text-zinc-500">Total a pagar</div>
-                    <div className="mt-1 text-lg font-bold text-zinc-900">
-                      {summaryLoading || !summary ? "—" : moneyARS(summary.totals.totalPay)}
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600">
-                      {summaryLoading || !summary ? "" : `${hoursFmt(summary.totals.totalHours)} totales`}
-                    </div>
+              <Field label="Empleados">
+                <Select
+                  value={onlyActive ? "active" : "all"}
+                  onChange={(e) => setOnlyActive(e.target.value === "active")}
+                >
+                  <option value="active">Solo activos</option>
+                  <option value="all">Todos</option>
+                </Select>
+              </Field>
+
+              <Field label="Buscar">
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Buscar por nombre…"
+                />
+              </Field>
+
+              <div className="flex items-end">
+                <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                  <div className="text-xs text-zinc-500">Rango</div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-900">
+                    {range.from} → {range.to}
                   </div>
                 </div>
               </div>
-            </CardBody>
-          </Card>
+            </div>
+          </CardBody>
+        </Card>
 
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <table className="min-w-full">
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Empleado
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    $/hora
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Días
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Horas
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Total
-                  </th>
-                </tr>
-              </thead>
+        {/* SUMMARY */}
+        {tab === "summary" && (
+          <>
+            <Card>
+              <CardHeader title="Periodo" />
+              <CardBody>
+                <div className="grid gap-3 md:grid-cols-5">
+                  <Field label="Tipo">
+                    <Select
+                      value={period}
+                      onChange={(e) => setPeriod(e.target.value as Period)}
+                    >
+                      <option value="day">Día</option>
+                      <option value="week">Semana</option>
+                      <option value="biweek">Quincena</option>
+                      <option value="month">Mes</option>
+                      <option value="custom">Custom</option>
+                    </Select>
+                  </Field>
 
-              <tbody className="divide-y divide-zinc-100">
-                {summaryLoading && (
+                  {period !== "custom" ? (
+                    <Field label="Fecha base">
+                      <Input
+                        type="date"
+                        value={baseDate}
+                        onChange={(e) => setBaseDate(e.target.value)}
+                      />
+                    </Field>
+                  ) : (
+                    <>
+                      <Field label="Desde">
+                        <Input
+                          type="date"
+                          value={customFrom}
+                          onChange={(e) => setCustomFrom(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Hasta">
+                        <Input
+                          type="date"
+                          value={customTo}
+                          onChange={(e) => setCustomTo(e.target.value)}
+                        />
+                      </Field>
+                    </>
+                  )}
+
+                  <div className="md:col-span-2 flex items-end">
+                    <div className="w-full rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div className="text-xs text-zinc-500">Total a pagar</div>
+                      <div className="mt-1 text-lg font-bold text-zinc-900">
+                        {summaryLoading || !summary
+                          ? "—"
+                          : moneyARS(summary.totals.totalPay)}
+                      </div>
+                      <div className="mt-1 text-sm text-zinc-600">
+                        {summaryLoading || !summary
+                          ? ""
+                          : `${hoursFmt(summary.totals.totalHours)} totales`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+
+            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              <table className="min-w-full">
+                <thead className="bg-zinc-50">
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
-                      Cargando…
-                    </td>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Empleado
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      $/hora
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Días
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Horas
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Total
+                    </th>
                   </tr>
-                )}
+                </thead>
 
-                {!summaryLoading && filteredItems.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
-                      No hay datos en el rango.
-                    </td>
-                  </tr>
-                )}
-
-                {!summaryLoading &&
-                  filteredItems.map((it) => (
-                    <tr key={it.employeeId} className="hover:bg-zinc-50">
-                      <td className="px-4 py-3 font-semibold">{it.fullName}</td>
-                      <td className="px-4 py-3">{moneyARS(it.hourlyRate).replace(",00", "")}</td>
-                      <td className="px-4 py-3">{it.daysWorked}</td>
-                      <td className="px-4 py-3">{hoursFmt(it.totalHours)}</td>
-                      <td className="px-4 py-3 font-bold">{moneyARS(it.totalPay)}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {/* DAY */}
-      {tab === "day" && (
-        <>
-          <Card>
-            <CardHeader title="Detalle por día" />
-            <CardBody>
-              <Field label="Fecha">
-                <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
-              </Field>
-            </CardBody>
-          </Card>
-
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <table className="min-w-full">
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Empleado
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Check-in
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Check-out
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
-                    Notas
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-zinc-100">
-                {dayLoading && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
-                      Cargando…
-                    </td>
-                  </tr>
-                )}
-
-                {!dayLoading && dayRowsView.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-sm text-zinc-500">
-                      No hay asistencias para ese día.
-                    </td>
-                  </tr>
-                )}
-
-                {!dayLoading &&
-                  dayRowsView.map((r) => (
-                    <tr key={r.id} className="hover:bg-zinc-50">
-                      <td className="px-4 py-3 font-semibold">
-                        {r.employeeName || r.employeeId}
+                <tbody className="divide-y divide-zinc-100">
+                  {summaryLoading && (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-4 py-6 text-sm text-zinc-500"
+                      >
+                        Cargando…
                       </td>
-                      <td className="px-4 py-3">{fmtShort(r.checkInAt)}</td>
-                      <td className="px-4 py-3">{fmtShort(r.checkOutAt)}</td>
-                      <td className="px-4 py-3">{r.notes?.trim() || "—"}</td>
                     </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
+                  )}
+
+                  {!summaryLoading && filteredItems.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-4 py-6 text-sm text-zinc-500"
+                      >
+                        No hay datos en el rango.
+                      </td>
+                    </tr>
+                  )}
+
+                  {!summaryLoading &&
+                    filteredItems.map((it) => (
+                      <tr key={it.employeeId} className="hover:bg-zinc-50">
+                        <td className="px-4 py-3 font-semibold">
+                          {it.fullName}
+                          {!it.isActive && (
+                            <span className="ml-2 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-600">
+                              inactivo
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {moneyARSNoCents(it.hourlyRate)}
+                        </td>
+                        <td className="px-4 py-3">{it.daysWorked}</td>
+                        <td className="px-4 py-3">{hoursFmt(it.totalHours)}</td>
+                        <td className="px-4 py-3 font-bold">
+                          {moneyARS(it.totalPay)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {/* DAY */}
+        {tab === "day" && (
+          <>
+            <Card>
+              <CardHeader title="Detalle por día" />
+              <CardBody>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Field label="Fecha">
+                    <Input
+                      type="date"
+                      value={dateKey}
+                      onChange={(e) => setDateKey(e.target.value)}
+                    />
+                  </Field>
+
+                  <div className="md:col-span-2 flex items-end">
+                    <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <div className="text-xs text-zinc-500">
+                        Registros del día
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-zinc-900">
+                        {dayLoading ? "Cargando…" : `${dayRowsView.length} fila(s)`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+
+            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              <table className="min-w-full">
+                <thead className="bg-zinc-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Empleado
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Check-in
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Check-out
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
+                      Notas
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-zinc-100">
+                  {dayLoading && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-4 py-6 text-sm text-zinc-500"
+                      >
+                        Cargando…
+                      </td>
+                    </tr>
+                  )}
+
+                  {!dayLoading && dayRowsView.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-4 py-6 text-sm text-zinc-500"
+                      >
+                        No hay asistencias para ese día.
+                      </td>
+                    </tr>
+                  )}
+
+                  {!dayLoading &&
+                    dayRowsView.map((r) => (
+                      <tr key={r.id} className="hover:bg-zinc-50">
+                        <td className="px-4 py-3 font-semibold">
+                          {r.employeeName || r.employeeId}
+                        </td>
+                        <td className="px-4 py-3">{fmtShort(r.checkInAt)}</td>
+                        <td className="px-4 py-3">{fmtShort(r.checkOutAt)}</td>
+                        <td className="px-4 py-3">{r.notes?.trim() || "—"}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </AdminProtected>
   );
 }

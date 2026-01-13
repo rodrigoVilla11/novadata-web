@@ -13,6 +13,7 @@ import {
   Search,
   XCircle,
   BadgeCheck,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { Notice } from "./Notice";
@@ -32,19 +33,10 @@ import {
 import type { OrderPaidMeta, OrderRow } from "@/lib/adminOrders/types";
 
 /* =============================================================================
- * Page: Admin Orders
+ * Page: Admin Orders (UX/UI improved)
+ * - Better mobile: Filters Drawer + Cards list + sticky bottom actions
+ * - Desktop: Table as before
  * ========================================================================== */
-
-/**
- * ✅ IMPORTANTE:
- * - Quitamos DELIVERED porque NO existe en el enum backend (OrderStatus).
- * - El paidMap lo armamos con ventas filtradas por "from/to" por defecto (últimos 30 días),
- *   para evitar traer “cualquier cosa” y además darle chances a mapear pedidos listados.
- *
- * Si tu /sales todavía no soporta from/to, podés:
- *   - dejar solo `limit=500`
- *   - o mejor: crear endpoint /sales/paid-map?orderIds=...
- */
 
 const STATUS_TABS = [
   { key: "", label: "Todos" },
@@ -61,6 +53,96 @@ function isoDate(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const da = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${da}`;
+}
+
+/* =============================================================================
+ * Minimal Drawer (no deps)
+ * - Bottom sheet on mobile
+ * ========================================================================== */
+function Drawer({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    setTimeout(() => panelRef.current?.focus(), 0);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-60">
+      <button
+        aria-label="Cerrar"
+        className="absolute inset-0 bg-black/35"
+        onClick={onClose}
+      />
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-hidden rounded-t-3xl border-t border-zinc-200 bg-white shadow-2xl outline-none"
+      >
+        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-10 rounded-full bg-zinc-200" />
+            <h3 className="text-sm font-semibold text-zinc-900">
+              {title || "Detalle"}
+            </h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-zinc-50"
+          >
+            Cerrar
+          </button>
+        </div>
+        <div className="overflow-auto p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <div className="animate-pulse rounded-2xl border border-zinc-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="h-4 w-40 rounded bg-zinc-100" />
+          <div className="mt-2 h-3 w-64 rounded bg-zinc-100" />
+          <div className="mt-3 flex gap-2">
+            <div className="h-6 w-20 rounded-full bg-zinc-100" />
+            <div className="h-6 w-24 rounded-full bg-zinc-100" />
+            <div className="h-6 w-20 rounded-full bg-zinc-100" />
+          </div>
+        </div>
+        <div className="h-8 w-24 rounded-xl bg-zinc-100" />
+      </div>
+    </div>
+  );
 }
 
 export default function AdminOrdersPage() {
@@ -84,19 +166,14 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [paidMap, setPaidMap] = useState<Record<string, OrderPaidMeta>>({});
 
-  // Drawer
+  // Drawer: order details
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
+  // Drawer: filters (mobile)
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   async function loadSalesPaidMap() {
-    /**
-     * Traemos ventas recientes y armamos mapa orderId -> sale meta.
-     * Asumimos que el backend filtra por branch vía req.user (lo ideal).
-     *
-     * Para mejorar precisión:
-     * - pedimos ventas de los últimos 30 días (from/to),
-     * - y limit alto (500).
-     */
     try {
       const to = new Date();
       const from = new Date();
@@ -107,7 +184,10 @@ export default function AdminOrdersPage() {
       qs.set("from", isoDate(from));
       qs.set("to", isoDate(to));
 
-      const rows = await apiFetchAuthed<any[]>(getAccessToken, `/sales?${qs.toString()}`);
+      const rows = await apiFetchAuthed<any[]>(
+        getAccessToken,
+        `/sales?${qs.toString()}`
+      );
 
       const map: Record<string, OrderPaidMeta> = {};
       for (const s of rows ?? []) {
@@ -126,9 +206,11 @@ export default function AdminOrdersPage() {
         if (!prev) {
           map[orderId] = { saleId, saleStatus, paidAt };
         } else {
-          const prevPaid = String(prev.saleStatus ?? "").toUpperCase() === "PAID";
+          const prevPaid =
+            String(prev.saleStatus ?? "").toUpperCase() === "PAID";
           const nowPaid = String(saleStatus ?? "").toUpperCase() === "PAID";
-          if (!prevPaid && nowPaid) map[orderId] = { saleId, saleStatus, paidAt };
+          if (!prevPaid && nowPaid)
+            map[orderId] = { saleId, saleStatus, paidAt };
         }
       }
 
@@ -230,18 +312,34 @@ export default function AdminOrdersPage() {
     return map;
   }, [orders]);
 
+  const activeTabLabel = useMemo(() => {
+    const t = STATUS_TABS.find((x) => x.key === status);
+    return t?.label || "Todos";
+  }, [status]);
+
+  const activeFiltersCount = useMemo(() => {
+    let n = 0;
+    if (status) n++;
+    if (fulfillment) n++;
+    if (q.trim()) n++;
+    // limit no cuenta como filtro
+    return n;
+  }, [status, fulfillment, q]);
+
+  const busyOrLoading = busy || loading;
+
   return (
     <AdminProtected>
-      <div className="space-y-6">
+      <div className="space-y-4 md:space-y-6">
         {/* Header */}
-        <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+              <h1 className="text-xl font-semibold tracking-tight text-zinc-900 md:text-2xl">
                 Pedidos
               </h1>
               <p className="mt-1 text-sm text-zinc-500">
-                Ver, aceptar/rechazar/cancelar, editar y cobrar desde el drawer.
+                Abrí un pedido para ver/editar/cobrar desde el drawer.
               </p>
 
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-600">
@@ -249,13 +347,40 @@ export default function AdminOrdersPage() {
                   <ClipboardList className="h-4 w-4" />
                   Total: <b>{orders.length}</b>
                 </span>
+                <span className="hidden text-zinc-300 md:inline">•</span>
+                <span className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
+                  Estado:{" "}
+                  <span className="text-zinc-800">{activeTabLabel}</span>
+                </span>
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={refresh} loading={busy || loading}>
-                <RefreshCcw className="h-4 w-4" />
-                Actualizar
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setFiltersOpen(true)}
+                disabled={!canUse}
+                className="md:hidden"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Filtros
+                {activeFiltersCount ? (
+                  <span className="ml-2 rounded-full bg-zinc-900 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {activeFiltersCount}
+                  </span>
+                ) : null}
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={refresh}
+                loading={busyOrLoading}
+                disabled={!canUse}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                  Actualizar{" "}
+                </span>
               </Button>
             </div>
           </div>
@@ -270,40 +395,48 @@ export default function AdminOrdersPage() {
           {!canUse && (
             <div className="mt-4">
               <Notice tone="warn">
-                Tu usuario no tiene roles para gestionar pedidos (ADMIN/MANAGER/CASHIER).
+                Tu usuario no tiene roles para gestionar pedidos
+                (ADMIN/MANAGER/CASHIER).
               </Notice>
             </div>
           )}
 
-          {/* Tabs */}
-          <div className="mt-5 flex flex-wrap gap-2">
-            {STATUS_TABS.map((t) => {
-              const active = status === t.key;
-              const count =
-                t.key === "" ? orders.length : counts[String(t.key).toUpperCase()] || 0;
+          {/* Tabs (scrollable on mobile) */}
+          <div className="mt-5 -mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+            <div className="flex w-max gap-2 md:flex-wrap md:w-auto">
+              {STATUS_TABS.map((t) => {
+                const active = status === t.key;
+                const count =
+                  t.key === ""
+                    ? orders.length
+                    : counts[String(t.key).toUpperCase()] || 0;
 
-              return (
-                <button
-                  key={t.key}
-                  onClick={() => setStatus(t.key)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-semibold",
-                    active
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                  )}
-                >
-                  {t.label}{" "}
-                  <span className={cn(active ? "text-white/80" : "text-zinc-400")}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setStatus(t.key)}
+                    disabled={!canUse}
+                    className={cn(
+                      "shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                      active
+                        ? "border-zinc-900 bg-zinc-900 text-white"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                    )}
+                  >
+                    {t.label}{" "}
+                    <span
+                      className={cn(active ? "text-white/80" : "text-zinc-400")}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Filters */}
-          <div className="mt-5 grid gap-3 md:grid-cols-4">
+          {/* Desktop Filters */}
+          <div className="mt-5 hidden gap-3 md:grid md:grid-cols-4">
             <Field label="Fulfillment">
               <Select
                 value={fulfillment}
@@ -324,7 +457,7 @@ export default function AdminOrdersPage() {
                   className="pl-9"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="ID, nombre, tel, nota… (según backend)"
+                  placeholder="ID, nombre, tel, nota…"
                   disabled={!canUse}
                 />
               </div>
@@ -352,159 +485,397 @@ export default function AdminOrdersPage() {
                   setQ("");
                   setLimit(50);
                 }}
-                disabled={!canUse || busy || loading}
+                disabled={!canUse || busyOrLoading}
               >
-                <XCircle className="h-4 w-4" />
-                Limpiar
+                <span className="inline-flex items-center gap-2">
+                  <XCircle className="h-4 w-4" />
+                  Limpiar
+                </span>
               </Button>
             </div>
           </div>
         </div>
 
-        {/* List */}
-        <Card>
-          <CardHeader title="Listado" subtitle="Click en un pedido para ver/editar/cobrar" />
-          <CardBody>
-            <div className="overflow-x-auto rounded-2xl border border-zinc-200">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Fecha
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Estado
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Pago
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Tipo
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Cliente
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Items
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Total
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Nota
-                    </th>
-                  </tr>
-                </thead>
+        {/* LIST: Mobile cards */}
+        <div className="md:hidden space-y-3">
+          {busyOrLoading && (
+            <>
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+            </>
+          )}
 
-                <tbody className="divide-y divide-zinc-100">
-                  {(loading || busy) && (
+          {!busyOrLoading && orders.length === 0 && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600">
+              No hay pedidos con estos filtros.
+            </div>
+          )}
+
+          {!busyOrLoading &&
+            orders.map((o) => {
+              const meta = fulfillmentMeta(o.fulfillment);
+              const customer =
+                o.customerSnapshot?.name ||
+                o.customerSnapshot?.phone ||
+                (o.customerId ? `CustomerId: ${o.customerId}` : "—");
+
+              const pm = paidMap[o.id];
+              const payStatus = pm?.saleStatus ?? null;
+
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => {
+                    setSelectedOrderId(o.id);
+                    setDrawerOpen(true);
+                  }}
+                  className="w-full text-left"
+                  disabled={!canUse}
+                >
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:bg-zinc-50 disabled:opacity-60">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-zinc-500">
+                          {fmtDateTime(o.createdAt)}
+                        </div>
+                        <div className="mt-1 truncate text-sm font-semibold text-zinc-900">
+                          {customer}
+                        </div>
+                        {o.customerSnapshot?.addressLine1 ? (
+                          <div className="mt-1 truncate text-xs text-zinc-500">
+                            {o.customerSnapshot.addressLine1}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        <div className="text-sm font-bold text-zinc-900">
+                          {o.total != null ? moneyARS(o.total) : "—"}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          Items: {o.itemsCount ?? "—"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
+                          statusPillClass(o.status)
+                        )}
+                      >
+                        {String(o.status)}
+                      </span>
+
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold",
+                          salePillClass(payStatus)
+                        )}
+                        title={
+                          pm?.paidAt ? `Pagado: ${fmtDateTime(pm.paidAt)}` : ""
+                        }
+                      >
+                        <BadgeCheck className="h-4 w-4" />
+                        {payStatus ? String(payStatus) : "SIN VENTA"}
+                      </span>
+
+                      <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                        {meta.icon}
+                        {meta.label}
+                      </span>
+                    </div>
+
+                    {o.note ? (
+                      <div className="mt-3 line-clamp-2 text-xs text-zinc-600">
+                        {o.note}
+                      </div>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+
+          <div className="pb-16 text-xs text-zinc-500">
+            Tip: abrí un pedido para cobrarlo desde el panel “Cobro”.
+          </div>
+        </div>
+
+        {/* LIST: Desktop table */}
+        <div className="hidden md:block">
+          <Card>
+            <CardHeader
+              title="Listado"
+              subtitle="Click en un pedido para ver/editar/cobrar"
+            />
+            <CardBody>
+              <div className="overflow-x-auto rounded-2xl border border-zinc-200">
+                <table className="min-w-full">
+                  <thead className="bg-zinc-50">
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-sm text-zinc-500">
-                        Cargando…
-                      </td>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Fecha
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Estado
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Pago
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Tipo
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Cliente
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Items
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Total
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                        Nota
+                      </th>
                     </tr>
-                  )}
+                  </thead>
 
-                  {!loading && !busy && orders.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-sm text-zinc-500">
-                        No hay pedidos con estos filtros.
-                      </td>
-                    </tr>
-                  )}
-
-                  {!loading &&
-                    !busy &&
-                    orders.map((o) => {
-                      const meta = fulfillmentMeta(o.fulfillment);
-                      const customer =
-                        o.customerSnapshot?.name ||
-                        o.customerSnapshot?.phone ||
-                        (o.customerId ? `CustomerId: ${o.customerId}` : "—");
-
-                      const pm = paidMap[o.id];
-                      const payStatus = pm?.saleStatus ?? null;
-
-                      return (
-                        <tr
-                          key={o.id}
-                          className="hover:bg-zinc-50 cursor-pointer"
-                          onClick={() => {
-                            setSelectedOrderId(o.id);
-                            setDrawerOpen(true);
-                          }}
+                  <tbody className="divide-y divide-zinc-100">
+                    {busyOrLoading && (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="px-4 py-10 text-sm text-zinc-500"
                         >
-                          <td className="px-4 py-3 text-sm text-zinc-600">
-                            {fmtDateTime(o.createdAt)}
-                          </td>
+                          Cargando…
+                        </td>
+                      </tr>
+                    )}
 
-                          <td className="px-4 py-3 text-sm">
-                            <span
-                              className={cn(
-                                "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
-                                statusPillClass(o.status)
-                              )}
-                            >
-                              {String(o.status)}
-                            </span>
-                          </td>
+                    {!busyOrLoading && orders.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="px-4 py-10 text-sm text-zinc-500"
+                        >
+                          No hay pedidos con estos filtros.
+                        </td>
+                      </tr>
+                    )}
 
-                          <td className="px-4 py-3 text-sm">
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold",
-                                salePillClass(payStatus)
-                              )}
-                              title={pm?.paidAt ? `Pagado: ${fmtDateTime(pm.paidAt)}` : ""}
-                            >
-                              <BadgeCheck className="h-4 w-4" />
-                              {payStatus ? String(payStatus) : "SIN VENTA"}
-                            </span>
-                          </td>
+                    {!busyOrLoading &&
+                      orders.map((o) => {
+                        const meta = fulfillmentMeta(o.fulfillment);
+                        const customer =
+                          o.customerSnapshot?.name ||
+                          o.customerSnapshot?.phone ||
+                          (o.customerId ? `CustomerId: ${o.customerId}` : "—");
 
-                          <td className="px-4 py-3 text-sm text-zinc-700">
-                            <span className="inline-flex items-center gap-2">
-                              {meta.icon}
-                              {meta.label}
-                            </span>
-                          </td>
+                        const pm = paidMap[o.id];
+                        const payStatus = pm?.saleStatus ?? null;
 
-                          <td className="px-4 py-3 text-sm text-zinc-700">
-                            <div className="min-w-0">
-                              <div className="truncate">{customer}</div>
-                              {o.customerSnapshot?.addressLine1 ? (
-                                <div className="text-xs text-zinc-500 truncate">
-                                  {o.customerSnapshot.addressLine1}
-                                </div>
-                              ) : null}
-                            </div>
-                          </td>
+                        return (
+                          <tr
+                            key={o.id}
+                            className="cursor-pointer hover:bg-zinc-50"
+                            onClick={() => {
+                              setSelectedOrderId(o.id);
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            <td className="px-4 py-3 text-sm text-zinc-600">
+                              {fmtDateTime(o.createdAt)}
+                            </td>
 
-                          <td className="px-4 py-3 text-sm text-zinc-700">
-                            {o.itemsCount ?? "—"}
-                          </td>
+                            <td className="px-4 py-3 text-sm">
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                  statusPillClass(o.status)
+                                )}
+                              >
+                                {String(o.status)}
+                              </span>
+                            </td>
 
-                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
-                            {o.total != null ? moneyARS(o.total) : "—"}
-                          </td>
+                            <td className="px-4 py-3 text-sm">
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                  salePillClass(payStatus)
+                                )}
+                                title={
+                                  pm?.paidAt
+                                    ? `Pagado: ${fmtDateTime(pm.paidAt)}`
+                                    : ""
+                                }
+                              >
+                                <BadgeCheck className="h-4 w-4" />
+                                {payStatus ? String(payStatus) : "SIN VENTA"}
+                              </span>
+                            </td>
 
-                          <td className="px-4 py-3 text-sm text-zinc-600">
-                            <div className="max-w-[340px] truncate">{o.note || "—"}</div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              <span className="inline-flex items-center gap-2">
+                                {meta.icon}
+                                {meta.label}
+                              </span>
+                            </td>
+
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              <div className="min-w-0">
+                                <div className="truncate">{customer}</div>
+                                {o.customerSnapshot?.addressLine1 ? (
+                                  <div className="truncate text-xs text-zinc-500">
+                                    {o.customerSnapshot.addressLine1}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3 text-sm text-zinc-700">
+                              {o.itemsCount ?? "—"}
+                            </td>
+
+                            <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                              {o.total != null ? moneyARS(o.total) : "—"}
+                            </td>
+
+                            <td className="px-4 py-3 text-sm text-zinc-600">
+                              <div className="max-w-85 truncate">
+                                {o.note || "—"}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 text-xs text-zinc-500">
+                Tip: si un pedido se paga en efectivo después, abrilo y cobralo
+                desde el panel “Cobro”.
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+
+        {/* Sticky bottom bar (mobile) */}
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 p-3 backdrop-blur md:hidden">
+          <div className="mx-auto flex max-w-3xl items-center gap-2">
+            <button
+              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
+              disabled={!canUse}
+              onClick={() => setFiltersOpen(true)}
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <SlidersHorizontal className="h-4 w-4" />
+                Filtros
+                {activeFiltersCount ? (
+                  <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {activeFiltersCount}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+
+            <button
+              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 disabled:opacity-60"
+              disabled={!canUse || busyOrLoading}
+              onClick={refresh}
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <RefreshCcw className="h-4 w-4" />
+                Actualizar
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Filters Drawer (mobile) */}
+        <Drawer
+          open={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          title="Filtros"
+        >
+          <div className="grid gap-3">
+            <Field label="Fulfillment">
+              <Select
+                value={fulfillment}
+                onChange={(e) => setFulfillment(e.target.value)}
+                disabled={!canUse}
+              >
+                <option value="">— Todos —</option>
+                <option value="DINE_IN">Salón</option>
+                <option value="TAKEAWAY">Take-away</option>
+                <option value="DELIVERY">Delivery</option>
+              </Select>
+            </Field>
+
+            <Field label="Buscar">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  className="pl-9"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="ID, nombre, tel, nota…"
+                  disabled={!canUse}
+                />
+              </div>
+            </Field>
+
+            <Field label="Límite">
+              <Select
+                value={String(limit)}
+                onChange={(e) => setLimit(Number(e.target.value))}
+                disabled={!canUse}
+              >
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </Select>
+            </Field>
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+                disabled={!canUse || busyOrLoading}
+                onClick={() => {
+                  setStatus("");
+                  setFulfillment("");
+                  setQ("");
+                  setLimit(50);
+                  setFiltersOpen(false);
+                }}
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <XCircle className="h-4 w-4" />
+                  Limpiar
+                </span>
+              </button>
+
+              <button
+                className="rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+                disabled={!canUse}
+                onClick={() => setFiltersOpen(false)}
+              >
+                Aplicar
+              </button>
             </div>
 
-            <div className="mt-3 text-xs text-zinc-500">
-              Tip: si un pedido se paga en efectivo después, abrilo y cobralo desde el panel “Cobro”.
+            <div className="pt-2 text-xs text-zinc-500">
+              Tip: los tabs de estado ya filtran arriba (deslizá horizontal si
+              no entran).
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </Drawer>
 
-        {/* Drawer */}
+        {/* Order Drawer */}
         <OrderDrawer
           open={drawerOpen}
           orderId={selectedOrderId}

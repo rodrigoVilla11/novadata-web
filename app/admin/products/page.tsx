@@ -22,16 +22,14 @@ import {
   Trash2,
   RotateCcw,
   Filter,
+  X,
+  PanelRightOpen,
+  PanelRightClose,
 } from "lucide-react";
 
-/* ============================================================================
- * Types (alineado a tu schema + branch requerido)
- * ========================================================================== */
-
+/* ============================================================================ */
 type Unit = "UNIT" | "KG" | "L";
 type Currency = "ARS" | "USD";
-
-type Branch = { id: string; name: string; isActive: boolean };
 
 type Supplier = { id: string; name: string; isActive: boolean };
 
@@ -76,7 +74,7 @@ type Product = {
   name: string;
   description: string | null;
 
-  branchId: string; // ✅ requerido
+  branchId?: string;
 
   supplierId?: string | null;
 
@@ -134,10 +132,8 @@ type Product = {
   updatedAt?: string;
 };
 
-/* ============================================================================
- * Helpers
- * ========================================================================== */
-
+/* ============================================================================ */
+/* Helpers */
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -220,14 +216,92 @@ function Notice({
   );
 }
 
-/* ============================================================================
- * Page
- * ========================================================================== */
+/** Drawer shell (responsive)
+ * - Mobile: full screen
+ * - Desktop: right panel
+ */
+function Drawer({
+  open,
+  onClose,
+  title,
+  subtitle,
+  children,
+  footer,
+  widthClass = "max-w-3xl",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  widthClass?: string;
+}) {
+  if (!open) return null;
 
+  return (
+    <div className="fixed inset-0 z-50">
+      <button
+        className="absolute inset-0 bg-black/30"
+        onClick={onClose}
+        aria-label="Cerrar"
+      />
+      <div
+        className={cn(
+          "absolute right-0 top-0 h-full w-full bg-white shadow-2xl border-l border-zinc-200",
+          widthClass
+        )}
+      >
+        {/* header */}
+        <div className="sticky top-0 z-10 border-b bg-white/95 backdrop-blur">
+          <div className="flex items-start justify-between gap-3 p-5">
+            <div className="min-w-0">
+              <div className="text-xs text-zinc-500">{subtitle || "Panel"}</div>
+              <div className="mt-0.5 truncate text-lg font-semibold text-zinc-900">
+                {title}
+              </div>
+            </div>
+            <Button variant="ghost" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* body */}
+        <div
+          className={cn(
+            "h-[calc(100%-64px)] overflow-auto",
+            footer ? "pb-28" : "pb-6"
+          )}
+        >
+          <div className="p-5">{children}</div>
+        </div>
+
+        {/* footer */}
+        {footer ? (
+          <div className="absolute bottom-0 left-0 right-0 border-t bg-white">
+            <div className="p-4">{footer}</div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Desktop width only: keep max width; Mobile: full width */}
+      <style jsx>{`
+        @media (min-width: 768px) {
+          div.${widthClass.replace(" ", ".")} {
+            width: 100%;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ============================================================================ */
+/* Page */
 export default function AdminProductsPage() {
   const { getAccessToken } = useAuth();
 
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -241,15 +315,15 @@ export default function AdminProductsPage() {
   const [ok, setOk] = useState<string | null>(null);
 
   // filters
-  const [branchIdFilter, setBranchIdFilter] = useState("");
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
   const [sellableOnly, setSellableOnly] = useState(false);
   const [producedOnly, setProducedOnly] = useState(false);
   const [categoryIdFilter, setCategoryIdFilter] = useState("");
+  const [filtersOpenMobile, setFiltersOpenMobile] = useState(false);
 
-  // create form
-  const [createOpen, setCreateOpen] = useState(true);
+  // create drawer
+  const [createOpen, setCreateOpen] = useState(false);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -265,24 +339,23 @@ export default function AdminProductsPage() {
   const [yieldQty, setYieldQty] = useState("1");
   const [yieldUnit, setYieldUnit] = useState<Unit>("UNIT");
 
-  const [wastePct, setWastePct] = useState("0"); // 0..1
+  const [wastePct, setWastePct] = useState("0");
   const [extraCost, setExtraCost] = useState("0");
   const [packagingCost, setPackagingCost] = useState("0");
 
   const [currency, setCurrency] = useState<Currency>("ARS");
 
-  const [salePrice, setSalePrice] = useState(""); // if set, overrides suggested
-  const [marginPct, setMarginPct] = useState("0.3"); // 0..1
+  const [salePrice, setSalePrice] = useState("");
+  const [marginPct, setMarginPct] = useState("0.3");
 
   const [isSellable, setIsSellable] = useState(true);
   const [isProduced, setIsProduced] = useState(true);
 
   // item adder (GLOBAL search: ingredients + preparations)
-  const [addPickId, setAddPickId] = useState<string>(""); // "I:<id>" | "P:<id>"
+  const [addPickId, setAddPickId] = useState<string>("");
   const [addQty, setAddQty] = useState<string>("1");
   const [addNote, setAddNote] = useState<string>("");
   const [addSearch, setAddSearch] = useState<string>("");
-
   const [itemsDraft, setItemsDraft] = useState<ProductItemDraft[]>([]);
 
   // details / edit drawer
@@ -290,7 +363,6 @@ export default function AdminProductsPage() {
   const [selected, setSelected] = useState<Product | null>(null);
 
   // edit drafts
-  const [editBranchId, setEditBranchId] = useState("");
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editCategoryId, setEditCategoryId] = useState<string>("");
@@ -321,11 +393,6 @@ export default function AdminProductsPage() {
   const [editAddNote, setEditAddNote] = useState<string>("");
   const [editAddSearch, setEditAddSearch] = useState<string>("");
 
-  const activeBranches = useMemo(
-    () => (branches || []).filter((b) => b.isActive !== false),
-    [branches]
-  );
-
   const activeCategories = useMemo(
     () =>
       (categories || [])
@@ -355,7 +422,9 @@ export default function AdminProductsPage() {
 
   // GLOBAL options (search across all, no supplier filter)
   const addOptions = useMemo(() => {
-    const supplierNameById = new Map(activeSuppliers.map((s) => [s.id, s.name]));
+    const supplierNameById = new Map(
+      activeSuppliers.map((s) => [s.id, s.name])
+    );
 
     const ing = activeIngredients.map((i) => {
       const sup = i.supplierId ? supplierNameById.get(i.supplierId) : null;
@@ -363,11 +432,10 @@ export default function AdminProductsPage() {
         id: `I:${i.id}`,
         kind: "INGREDIENT" as const,
         refId: i.id,
-        label: `${i.name} · ${unitLabel(i.unit)}${
-          sup ? ` · ${sup}` : ""
-        }`,
-        search:
-          `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
+        label: `${i.name} · ${unitLabel(i.unit)}${sup ? ` · ${sup}` : ""}`,
+        search: `${i.name} ${i.id} ${i.supplierId ?? ""} ${
+          sup ?? ""
+        }`.toLowerCase(),
       };
     });
 
@@ -380,16 +448,16 @@ export default function AdminProductsPage() {
     }));
 
     const all = [...ing, ...preps];
-
     const s = addSearch.trim().toLowerCase();
     if (!s) return all;
-
     return all.filter((o) => o.search.includes(s));
   }, [activeIngredients, activePreparations, activeSuppliers, addSearch]);
 
   // drawer options
   const editAddOptions = useMemo(() => {
-    const supplierNameById = new Map(activeSuppliers.map((s) => [s.id, s.name]));
+    const supplierNameById = new Map(
+      activeSuppliers.map((s) => [s.id, s.name])
+    );
 
     const ing = activeIngredients.map((i) => {
       const sup = i.supplierId ? supplierNameById.get(i.supplierId) : null;
@@ -397,11 +465,10 @@ export default function AdminProductsPage() {
         id: `I:${i.id}`,
         kind: "INGREDIENT" as const,
         refId: i.id,
-        label: `${i.name} · ${unitLabel(i.unit)}${
-          sup ? ` · ${sup}` : ""
-        }`,
-        search:
-          `${i.name} ${i.id} ${i.supplierId ?? ""} ${sup ?? ""}`.toLowerCase(),
+        label: `${i.name} · ${unitLabel(i.unit)}${sup ? ` · ${sup}` : ""}`,
+        search: `${i.name} ${i.id} ${i.supplierId ?? ""} ${
+          sup ?? ""
+        }`.toLowerCase(),
       };
     });
 
@@ -443,52 +510,23 @@ export default function AdminProductsPage() {
     });
   }, [products, onlyActive, sellableOnly, producedOnly, categoryIdFilter, q]);
 
-  /* ============================================================================
-   * Loaders
-   * ========================================================================== */
-
+  /* ============================================================================ */
+  /* Loaders */
   async function loadAll() {
     setErr(null);
     setOk(null);
     setLoading(true);
 
     try {
-      // branches primero (para elegir default)
-      const brs = await apiFetchAuthed<Branch[]>(getAccessToken, "/branches");
-      setBranches(brs);
-
-      let chosenBranchId = branchIdFilter;
-      if (!chosenBranchId) {
-        const first = brs.find((b) => b.isActive !== false) || brs[0];
-        chosenBranchId = first?.id || "";
-        if (chosenBranchId) setBranchIdFilter(chosenBranchId);
-      }
-
-      const branchQs = chosenBranchId
-        ? `?branchId=${encodeURIComponent(chosenBranchId)}`
-        : "";
-
-      const [
-        cats,
-        sups,
-        ings,
-        preps,
-        prods,
-      ] = await Promise.all([
-        // si tu backend no soporta branchId acá, lo va a ignorar
+      const [cats, sups, ings, preps, prods] = await Promise.all([
         apiFetchAuthed<Category[]>(
           getAccessToken,
-          `/categories?onlyActive=false${
-            chosenBranchId ? `&branchId=${encodeURIComponent(chosenBranchId)}` : ""
-          }`
+          `/categories?onlyActive=false`
         ),
-        apiFetchAuthed<Supplier[]>(getAccessToken, `/suppliers${branchQs}`),
-        apiFetchAuthed<Ingredient[]>(getAccessToken, `/ingredients${branchQs}`),
-        apiFetchAuthed<Preparation[]>(
-          getAccessToken,
-          `/preparations${branchQs}`
-        ),
-        apiFetchAuthed<Product[]>(getAccessToken, `/products${branchQs}`),
+        apiFetchAuthed<Supplier[]>(getAccessToken, `/suppliers`),
+        apiFetchAuthed<Ingredient[]>(getAccessToken, `/ingredients`),
+        apiFetchAuthed<Preparation[]>(getAccessToken, `/preparations`),
+        apiFetchAuthed<Product[]>(getAccessToken, `/products`),
       ]);
 
       setCategories(cats);
@@ -516,17 +554,8 @@ export default function AdminProductsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // recargar cuando cambie branch
-  useEffect(() => {
-    if (!branchIdFilter) return;
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchIdFilter]);
-
-  /* ============================================================================
-   * Create actions
-   * ========================================================================== */
-
+  /* ============================================================================ */
+  /* Create actions */
   function addItem() {
     if (!addPickId) return;
 
@@ -588,18 +617,12 @@ export default function AdminProductsPage() {
   async function create() {
     if (!name.trim()) return;
 
-    if (!branchIdFilter) {
-      setErr("Seleccioná una sucursal (branch) antes de crear el producto.");
-      return;
-    }
-
     if (!itemsDraft.length) {
       setErr("Agregá al menos 1 item (ingrediente o preparación).");
       return;
     }
 
     const payload = {
-      branchId: branchIdFilter, // ✅ requerido
       name: name.trim(),
       description: description.trim() || null,
       categoryId: categoryId || null,
@@ -653,6 +676,7 @@ export default function AdminProductsPage() {
         body: JSON.stringify(payload),
       });
 
+      // reset
       setName("");
       setDescription("");
       setSku("");
@@ -670,16 +694,16 @@ export default function AdminProductsPage() {
       setIsSellable(true);
       setIsProduced(true);
       setItemsDraft([]);
-
       setAddPickId("");
       setAddQty("1");
       setAddNote("");
       setAddSearch("");
 
       setOk("Producto creado ✔");
-      setTimeout(() => setOk(null), 1500);
+      setTimeout(() => setOk(null), 1200);
 
       await loadAll();
+      setCreateOpen(false);
     } catch (e: any) {
       setErr(e?.message || "Error creando producto");
     } finally {
@@ -693,7 +717,7 @@ export default function AdminProductsPage() {
       !window.confirm(
         next
           ? `¿Reactivar "${p.name}"?`
-          : `¿Desactivar "${p.name}"?\n\nNo aparecerá en flujos si filtrás solo activos.`
+          : `¿Desactivar "${p.name}"?\n\nNo aparecerá si filtrás solo activos.`
       )
     )
       return;
@@ -729,7 +753,7 @@ export default function AdminProductsPage() {
       });
       await loadAll();
       setOk("Recalculado ✔");
-      setTimeout(() => setOk(null), 1200);
+      setTimeout(() => setOk(null), 1000);
     } catch (e: any) {
       setErr(e?.message || "Error recalculando");
     } finally {
@@ -737,10 +761,8 @@ export default function AdminProductsPage() {
     }
   }
 
-  /* ============================================================================
-   * Details / Edit actions (GET/:id y PATCH/:id)
-   * ========================================================================== */
-
+  /* ============================================================================ */
+  /* Details / Edit */
   async function openDetails(p: Product) {
     setErr(null);
     setOk(null);
@@ -754,7 +776,6 @@ export default function AdminProductsPage() {
 
       setSelected(full);
 
-      setEditBranchId(full.branchId ?? branchIdFilter ?? "");
       setEditName(full.name ?? "");
       setEditDescription(full.description ?? "");
       setEditCategoryId(full.categoryId ?? "");
@@ -877,18 +898,12 @@ export default function AdminProductsPage() {
       return;
     }
 
-    if (!editBranchId) {
-      setErr("Branch requerido");
-      return;
-    }
-
     if (!editItemsDraft.length) {
       setErr("Agregá al menos 1 item.");
       return;
     }
 
     const payload = {
-      branchId: editBranchId, // ✅ requerido
       name: editName.trim(),
       description: editDescription.trim() || null,
       categoryId: editCategoryId || null,
@@ -938,7 +953,7 @@ export default function AdminProductsPage() {
       });
 
       setOk("Producto actualizado ✔");
-      setTimeout(() => setOk(null), 1200);
+      setTimeout(() => setOk(null), 1000);
 
       await loadAll();
 
@@ -959,10 +974,8 @@ export default function AdminProductsPage() {
     }
   }
 
-  /* ============================================================================
-   * Preview cost for create form (client-side approx)
-   * ========================================================================== */
-
+  /* ============================================================================ */
+  /* Preview cost for create (client-side approx) */
   const preview = useMemo(() => {
     if (!itemsDraft.length) return null;
 
@@ -997,7 +1010,8 @@ export default function AdminProductsPage() {
         ? null
         : Math.max(0, Math.min(1, toNum(marginPct)));
 
-    const suggestedPrice = sp != null ? null : m != null ? unitCost * (1 + m) : null;
+    const suggestedPrice =
+      sp != null ? null : m != null ? unitCost * (1 + m) : null;
 
     return { ingredientsCost, totalCost, unitCost, suggestedPrice };
   }, [
@@ -1012,29 +1026,429 @@ export default function AdminProductsPage() {
     marginPct,
   ]);
 
-  /* ============================================================================
-   * Render
-   * ========================================================================== */
+  /* ============================================================================ */
+  /* UI pieces */
 
+  const CreateContent = (
+    <div className="grid gap-6">
+      {/* Top summary */}
+      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+        <div className="mt-1 text-xs text-zinc-500">
+          Tip: podés mezclar <b>Ingredientes</b> y <b>Preparaciones</b>.
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-6">
+        <Field label="Nombre">
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+
+        <Field label="Categoría">
+          <Select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+          >
+            <option value="">(Sin categoría)</option>
+            {activeCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="SKU">
+          <Input
+            value={sku}
+            onChange={(e) => setSku(e.target.value)}
+            placeholder="Opcional"
+          />
+        </Field>
+
+        <Field label="Barcode">
+          <Input
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            placeholder="Opcional"
+          />
+        </Field>
+
+        <Field label="Tags">
+          <div className="relative">
+            <Tags className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={tagsRaw}
+              onChange={(e) => setTagsRaw(e.target.value)}
+              placeholder="sushi, promo"
+              className="pl-9"
+            />
+          </div>
+        </Field>
+
+        <Field label="Image URL">
+          <div className="relative">
+            <ImageIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="https://..."
+              className="pl-9"
+            />
+          </div>
+        </Field>
+      </div>
+
+      <Field label="Descripción">
+        <Input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Opcional"
+        />
+      </Field>
+
+      <div className="grid gap-4 md:grid-cols-6">
+        <Field label="Yield Qty">
+          <Input
+            value={yieldQty}
+            onChange={(e) =>
+              isValidNumberDraft(e.target.value) && setYieldQty(e.target.value)
+            }
+          />
+        </Field>
+
+        <Field label="Yield Unit">
+          <Select
+            value={yieldUnit}
+            onChange={(e) => setYieldUnit(e.target.value as Unit)}
+          >
+            <option value="UNIT">Unidad</option>
+            <option value="KG">Kg</option>
+            <option value="L">Litros</option>
+          </Select>
+        </Field>
+
+        <Field label="Waste % (0..1)">
+          <Input
+            value={wastePct}
+            onChange={(e) =>
+              isValidNumberDraft(e.target.value) && setWastePct(e.target.value)
+            }
+          />
+        </Field>
+
+        <Field label="Extra cost">
+          <Input
+            value={extraCost}
+            onChange={(e) =>
+              isValidNumberDraft(e.target.value) && setExtraCost(e.target.value)
+            }
+          />
+        </Field>
+
+        <Field label="Packaging">
+          <Input
+            value={packagingCost}
+            onChange={(e) =>
+              isValidNumberDraft(e.target.value) &&
+              setPackagingCost(e.target.value)
+            }
+          />
+        </Field>
+
+        <Field label="Moneda">
+          <Select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as any)}
+          >
+            <option value="ARS">ARS</option>
+            <option value="USD">USD</option>
+          </Select>
+        </Field>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-6">
+        <Field label="Sale price (opcional)">
+          <div className="relative">
+            <BadgeDollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={salePrice}
+              onChange={(e) =>
+                isValidNumberDraft(e.target.value) &&
+                setSalePrice(e.target.value)
+              }
+              className="pl-9"
+              placeholder="Si lo ponés, ignora sugerido"
+            />
+          </div>
+        </Field>
+
+        <Field label="Margin % (0..1)">
+          <div className="relative">
+            <Calculator className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={marginPct}
+              onChange={(e) =>
+                isValidNumberDraft(e.target.value) &&
+                setMarginPct(e.target.value)
+              }
+              className="pl-9"
+            />
+          </div>
+        </Field>
+
+        <div className="md:col-span-4 flex flex-wrap items-end justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setIsSellable((v) => !v)}
+            className={cn(
+              "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
+              isSellable
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+            )}
+          >
+            {isSellable ? "Sellable ✅" : "Sellable ❌"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsProduced((v) => !v)}
+            className={cn(
+              "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
+              isProduced
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+            )}
+          >
+            {isProduced ? "Producido ✅" : "Producido ❌"}
+          </button>
+        </div>
+      </div>
+
+      {/* Item adder */}
+      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+          <Layers className="h-4 w-4" /> Composición (items)
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-6">
+          <Field label="Buscar (global)">
+            <Input
+              value={addSearch}
+              onChange={(e) => setAddSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !addPickId && addOptions.length) {
+                  setAddPickId(addOptions[0].id);
+                }
+              }}
+              placeholder="Buscá ingrediente o preparación…"
+            />
+          </Field>
+
+          <Field label="Item">
+            <Select
+              value={addPickId}
+              onChange={(e) => setAddPickId(e.target.value)}
+            >
+              <option value="">Seleccionar…</option>
+              {addOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Cantidad">
+            <Input
+              value={addQty}
+              onChange={(e) =>
+                isValidNumberDraft(e.target.value) && setAddQty(e.target.value)
+              }
+            />
+          </Field>
+
+          <Field label="Nota">
+            <Input
+              value={addNote}
+              onChange={(e) => setAddNote(e.target.value)}
+              placeholder="Opcional"
+            />
+          </Field>
+
+          <div className="flex items-end">
+            <Button variant="secondary" onClick={addItem} disabled={!addPickId}>
+              <Plus className="h-4 w-4" />
+              Agregar
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-xl border border-zinc-200">
+          <table className="min-w-full">
+            <thead className="bg-zinc-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Tipo
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Item
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Qty
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Nota
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                  Acción
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {itemsDraft.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
+                    Agregá ingredientes o preparaciones.
+                  </td>
+                </tr>
+              )}
+
+              {itemsDraft.map((it, idx) => {
+                const label =
+                  it.type === "INGREDIENT"
+                    ? activeIngredients.find((x) => x.id === it.ingredientId)
+                        ?.name || "—"
+                    : activePreparations.find((x) => x.id === it.preparationId)
+                        ?.name || "—";
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-50">
+                    <td className="px-4 py-3 text-sm">{it.type}</td>
+                    <td className="px-4 py-3 font-medium">{label}</td>
+                    <td className="px-4 py-3">
+                      <Input
+                        value={it.qty}
+                        onChange={(e) => setItemQty(idx, e.target.value)}
+                        className="w-28"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-zinc-600">
+                      {it.note || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" onClick={() => removeItem(idx)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 grid gap-2 text-sm">
+          {preview ? (
+            <div className="grid gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <div className="font-semibold text-zinc-900">
+                Preview costos (cliente)
+              </div>
+              <div className="text-zinc-700">
+                Ingredients cost:{" "}
+                <b>{money(preview.ingredientsCost, currency)}</b>
+              </div>
+              <div className="text-zinc-700">
+                Total cost: <b>{money(preview.totalCost, currency)}</b>
+              </div>
+              <div className="text-zinc-700">
+                Unit cost: <b>{money(preview.unitCost, currency)}</b> /{" "}
+                {unitLabel(yieldUnit)}
+              </div>
+              <div className="text-zinc-700">
+                Precio sugerido:{" "}
+                <b>
+                  {preview.suggestedPrice == null
+                    ? "—"
+                    : money(preview.suggestedPrice, currency)}
+                </b>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-zinc-500">
+              Agregá items para ver preview.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const CreateFooter = (
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <Button
+          variant="secondary"
+          onClick={() => setCreateOpen(false)}
+          disabled={busy}
+        >
+          Cancelar
+        </Button>
+        <Button
+          onClick={create}
+          disabled={busy || !name.trim() || itemsDraft.length === 0}
+        >
+          <Plus className="h-4 w-4" />
+          Crear producto
+        </Button>
+      </div>
+    </div>
+  );
+
+  /* ============================================================================ */
+  /* Render */
   return (
     <AdminProtected>
       <div className="space-y-6 text-zinc-500">
-        {/* Header */}
-        <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+        {/* Top bar (sticky) */}
+        <div className="sticky top-0 z-30 -mx-4 border-b bg-white/80 px-4 py-3 backdrop-blur md:mx-0 md:rounded-2xl md:border md:border-zinc-200 md:shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs text-zinc-500">Admin</div>
+              <div className="truncate text-lg font-semibold text-zinc-900">
                 Productos
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500">
-                Productos vendibles (hechos con ingredientes / preparaciones) + costo y precio.
-              </p>
+              </div>
+              <div className="mt-0.5 text-xs text-zinc-500">
+                Costo + precio sugerido · Editar por drawer · Responsive
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setFiltersOpenMobile((v) => !v)}
+                className="md:hidden"
+              >
+                {filtersOpenMobile ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRightOpen className="h-4 w-4" />
+                )}
+                Filtros
+              </Button>
+
               <Button variant="secondary" onClick={loadAll} loading={loading}>
                 <RefreshCcw className="h-4 w-4" />
                 Actualizar
+              </Button>
+
+              <Button
+                onClick={() => setCreateOpen(true)}
+                disabled={busy}
+                title={"Crear producto"}
+              >
+                <Plus className="h-4 w-4" />
+                Nuevo
               </Button>
             </div>
           </div>
@@ -1047,28 +1461,15 @@ export default function AdminProductsPage() {
           </div>
         )}
 
-        {/* Filters */}
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+        {/* Filters (desktop inline, mobile collapsible) */}
+        <div
+          className={cn(
+            "rounded-2xl border border-zinc-200 bg-white p-4",
+            "md:block",
+            filtersOpenMobile ? "block" : "hidden md:block"
+          )}
+        >
           <div className="grid gap-3 lg:grid-cols-[260px_260px_1fr_auto_auto_auto] lg:items-center">
-            {/* Branch */}
-            <div className="relative">
-              <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-              <Select
-                value={branchIdFilter}
-                onChange={(e) => setBranchIdFilter(e.target.value)}
-                className="pl-9"
-              >
-                {activeBranches.length === 0 && (
-                  <option value="">Sin sucursales</option>
-                )}
-                {activeBranches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
             {/* Category */}
             <div className="relative">
               <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -1138,521 +1539,250 @@ export default function AdminProductsPage() {
           </div>
         </div>
 
-        {/* Create */}
-        <Card>
-          <CardHeader title="Crear producto" subtitle="Receta, costos y precio" />
-          <div className="flex items-start justify-between px-5 pt-2">
-            <div className="text-sm text-zinc-500">
-              Tip: podés mezclar <b>Ingredientes</b> y <b>Preparaciones</b>.
-              {branchIdFilter ? (
-                <>
-                  {" "}
-                  · Sucursal actual:{" "}
-                  <b>
-                    {activeBranches.find((b) => b.id === branchIdFilter)?.name ??
-                      "—"}
-                  </b>
-                </>
-              ) : null}
-            </div>
-            <button
-              onClick={() => setCreateOpen((v) => !v)}
-              className="rounded-xl border px-3 py-2 text-sm hover:bg-zinc-50"
-            >
-              {createOpen ? "Ocultar" : "Mostrar"}
-            </button>
+        {/* List (responsive: table desktop, cards mobile) */}
+        <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+          {/* Desktop table */}
+          <div className="hidden md:block">
+            <table className="min-w-full">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Producto
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Categoría
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Costo unit
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Precio
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Estado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-zinc-100">
+                {filteredProducts.map((p) => {
+                  const catLabel =
+                    p.categoryName ||
+                    (p.categoryId
+                      ? activeCategories.find((c) => c.id === p.categoryId)
+                          ?.name
+                      : null) ||
+                    "—";
+
+                  const ccy = (p.currency || "ARS") as Currency;
+                  const unitCost = Number(p.computed?.unitCost ?? 0) || 0;
+                  const totalCost = Number(p.computed?.totalCost ?? 0) || 0;
+
+                  const price =
+                    p.salePrice != null
+                      ? money(p.salePrice, ccy)
+                      : p.computed?.suggestedPrice != null
+                      ? money(p.computed.suggestedPrice, ccy)
+                      : "—";
+
+                  const gm =
+                    p.salePrice != null && p.computed?.grossMarginPct != null
+                      ? pct(p.computed.grossMarginPct)
+                      : "—";
+
+                  return (
+                    <tr key={p.id} className="hover:bg-zinc-50">
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-zinc-900">
+                          {p.name}
+                        </div>
+                        <div className="mt-0.5 text-xs text-zinc-500">
+                          Yield: <b>{p.yieldQty}</b> {unitLabel(p.yieldUnit)} ·
+                          Items: <b>{p.items?.length ?? 0}</b>
+                        </div>
+                        {(p.sku || p.barcode) && (
+                          <div className="mt-0.5 text-xs text-zinc-500">
+                            {p.sku ? (
+                              <span>
+                                SKU: <b>{p.sku}</b>
+                              </span>
+                            ) : null}
+                            {p.sku && p.barcode ? " · " : null}
+                            {p.barcode ? (
+                              <span>
+                                BAR: <b>{p.barcode}</b>
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                        {p.tags?.length ? (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {p.tags.slice(0, 4).map((t) => (
+                              <span
+                                key={t}
+                                className="inline-flex rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700"
+                              >
+                                {t}
+                              </span>
+                            ))}
+                            {p.tags.length > 4 && (
+                              <span className="text-xs text-zinc-400">
+                                +{p.tags.length - 4}
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
+                      </td>
+
+                      <td className="px-4 py-3 text-sm">{catLabel}</td>
+
+                      <td className="px-4 py-3 text-sm">
+                        <div className="font-semibold text-zinc-900">
+                          {money(unitCost, ccy)}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          Total: {money(totalCost, ccy)}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3 text-sm">
+                        <div className="font-semibold text-zinc-900">
+                          {price}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          Margen: {gm}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <StatusPill active={p.isActive} />
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="secondary"
+                            onClick={() => openDetails(p)}
+                            disabled={busy}
+                          >
+                            <Layers className="h-4 w-4" />
+                            Editar
+                          </Button>
+
+                          <Button
+                            variant="secondary"
+                            onClick={() => recompute(p)}
+                            disabled={busy}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Recompute
+                          </Button>
+
+                          <Button
+                            variant={p.isActive ? "danger" : "secondary"}
+                            onClick={() => toggleActive(p)}
+                            disabled={busy}
+                          >
+                            <Power className="h-4 w-4" />
+                            {p.isActive ? "Desactivar" : "Reactivar"}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!loading && filteredProducts.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-10 text-sm text-zinc-500"
+                    >
+                      No hay productos para mostrar.
+                    </td>
+                  </tr>
+                )}
+
+                {loading && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-10 text-sm text-zinc-500"
+                    >
+                      Cargando…
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
 
-          {createOpen && (
-            <CardBody>
-              <div className="grid gap-4 md:grid-cols-6">
-                <Field label="Nombre">
-                  <Input value={name} onChange={(e) => setName(e.target.value)} />
-                </Field>
-
-                <Field label="Categoría">
-                  <Select
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                  >
-                    <option value="">(Sin categoría)</option>
-                    {activeCategories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-
-                <Field label="SKU">
-                  <Input
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    placeholder="Opcional"
-                  />
-                </Field>
-
-                <Field label="Barcode">
-                  <Input
-                    value={barcode}
-                    onChange={(e) => setBarcode(e.target.value)}
-                    placeholder="Opcional"
-                  />
-                </Field>
-
-                <Field label="Tags">
-                  <div className="relative">
-                    <Tags className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={tagsRaw}
-                      onChange={(e) => setTagsRaw(e.target.value)}
-                      placeholder="sushi, promo"
-                      className="pl-9"
-                    />
-                  </div>
-                </Field>
-
-                <Field label="Image URL">
-                  <div className="relative">
-                    <ImageIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="https://..."
-                      className="pl-9"
-                    />
-                  </div>
-                </Field>
-              </div>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-6">
-                <Field label="Yield Qty">
-                  <Input
-                    value={yieldQty}
-                    onChange={(e) =>
-                      isValidNumberDraft(e.target.value) && setYieldQty(e.target.value)
-                    }
-                  />
-                </Field>
-
-                <Field label="Yield Unit">
-                  <Select
-                    value={yieldUnit}
-                    onChange={(e) => setYieldUnit(e.target.value as Unit)}
-                  >
-                    <option value="UNIT">Unidad</option>
-                    <option value="KG">Kg</option>
-                    <option value="L">Litros</option>
-                  </Select>
-                </Field>
-
-                <Field label="Waste % (0..1)">
-                  <Input
-                    value={wastePct}
-                    onChange={(e) =>
-                      isValidNumberDraft(e.target.value) && setWastePct(e.target.value)
-                    }
-                  />
-                </Field>
-
-                <Field label="Extra cost">
-                  <Input
-                    value={extraCost}
-                    onChange={(e) =>
-                      isValidNumberDraft(e.target.value) && setExtraCost(e.target.value)
-                    }
-                  />
-                </Field>
-
-                <Field label="Packaging">
-                  <Input
-                    value={packagingCost}
-                    onChange={(e) =>
-                      isValidNumberDraft(e.target.value) && setPackagingCost(e.target.value)
-                    }
-                  />
-                </Field>
-
-                <Field label="Moneda">
-                  <Select
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value as any)}
-                  >
-                    <option value="ARS">ARS</option>
-                    <option value="USD">USD</option>
-                  </Select>
-                </Field>
-              </div>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-6">
-                <Field label="Sale price (opcional)">
-                  <div className="relative">
-                    <BadgeDollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={salePrice}
-                      onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setSalePrice(e.target.value)
-                      }
-                      className="pl-9"
-                      placeholder="Si lo ponés, ignora sugerido"
-                    />
-                  </div>
-                </Field>
-
-                <Field label="Margin % (0..1)">
-                  <div className="relative">
-                    <Calculator className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={marginPct}
-                      onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setMarginPct(e.target.value)
-                      }
-                      className="pl-9"
-                    />
-                  </div>
-                </Field>
-
-                <div className="md:col-span-2 flex items-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsSellable((v) => !v)}
-                    className={cn(
-                      "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
-                      isSellable
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
-                    )}
-                  >
-                    {isSellable ? "Sellable ✅" : "Sellable ❌"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsProduced((v) => !v)}
-                    className={cn(
-                      "h-10 rounded-xl border px-3 text-sm font-semibold inline-flex items-center gap-2",
-                      isProduced
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
-                    )}
-                  >
-                    {isProduced ? "Producido ✅" : "Producido ❌"}
-                  </button>
+          {/* Mobile cards */}
+          <div className="md:hidden">
+            <div className="divide-y divide-zinc-100">
+              {loading ? (
+                <div className="px-4 py-10 text-sm text-zinc-500">
+                  Cargando…
                 </div>
-
-                <div className="md:col-span-2 flex items-end justify-end">
-                  <Button
-                    onClick={create}
-                    disabled={
-                      busy ||
-                      !name.trim() ||
-                      itemsDraft.length === 0 ||
-                      !branchIdFilter
-                    }
-                  >
-                    <Plus className="h-4 w-4" />
-                    Crear producto
-                  </Button>
+              ) : filteredProducts.length === 0 ? (
+                <div className="px-4 py-10 text-sm text-zinc-500">
+                  No hay productos para mostrar.
                 </div>
-              </div>
+              ) : (
+                filteredProducts.map((p) => {
+                  const ccy = (p.currency || "ARS") as Currency;
+                  const unitCost = Number(p.computed?.unitCost ?? 0) || 0;
+                  const price =
+                    p.salePrice != null
+                      ? money(p.salePrice, ccy)
+                      : p.computed?.suggestedPrice != null
+                      ? money(p.computed.suggestedPrice, ccy)
+                      : "—";
 
-              <div className="mt-4">
-                <Field label="Descripción">
-                  <Input
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Opcional"
-                  />
-                </Field>
-              </div>
-
-              {/* Item adder (GLOBAL SEARCH) */}
-              <div className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                  <Layers className="h-4 w-4" /> Composición (items)
-                </div>
-
-                <div className="mt-3 grid gap-3 md:grid-cols-6">
-                  <Field label="Buscar (global)">
-                    <Input
-                      value={addSearch}
-                      onChange={(e) => setAddSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !addPickId && addOptions.length) {
-                          setAddPickId(addOptions[0].id);
-                        }
-                      }}
-                      placeholder="Buscá ingrediente o preparación…"
-                    />
-                  </Field>
-
-                  <Field label="Item">
-                    <Select
-                      value={addPickId}
-                      onChange={(e) => setAddPickId(e.target.value)}
-                    >
-                      <option value="">Seleccionar…</option>
-                      {addOptions.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-
-                  <Field label="Cantidad">
-                    <Input
-                      value={addQty}
-                      onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setAddQty(e.target.value)
-                      }
-                    />
-                  </Field>
-
-                  <Field label="Nota">
-                    <Input
-                      value={addNote}
-                      onChange={(e) => setAddNote(e.target.value)}
-                      placeholder="Opcional"
-                    />
-                  </Field>
-
-                  <div className="flex items-end">
-                    <Button
-                      variant="secondary"
-                      onClick={addItem}
-                      disabled={!addPickId}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Agregar
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Draft list */}
-                <div className="mt-4 overflow-hidden rounded-xl border border-zinc-200">
-                  <table className="min-w-full">
-                    <thead className="bg-zinc-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                          Tipo
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                          Item
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                          Qty
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                          Nota
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                          Acción
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {itemsDraft.length === 0 && (
-                        <tr>
-                          <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
-                            Agregá ingredientes o preparaciones.
-                          </td>
-                        </tr>
-                      )}
-
-                      {itemsDraft.map((it, idx) => {
-                        const label =
-                          it.type === "INGREDIENT"
-                            ? activeIngredients.find((x) => x.id === it.ingredientId)?.name ||
-                              "—"
-                            : activePreparations.find((x) => x.id === it.preparationId)?.name ||
-                              "—";
-
-                        return (
-                          <tr key={idx} className="hover:bg-zinc-50">
-                            <td className="px-4 py-3 text-sm">{it.type}</td>
-                            <td className="px-4 py-3 font-medium">{label}</td>
-                            <td className="px-4 py-3">
-                              <Input
-                                value={it.qty}
-                                onChange={(e) => setItemQty(idx, e.target.value)}
-                                className="w-28"
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-zinc-600">
-                              {it.note || "—"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Button variant="ghost" onClick={() => removeItem(idx)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Preview */}
-                <div className="mt-4 grid gap-2 text-sm">
-                  {preview ? (
-                    <div className="grid gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                      <div className="font-semibold text-zinc-900">
-                        Preview costos (cliente)
-                      </div>
-                      <div className="text-zinc-700">
-                        Ingredients cost: <b>{money(preview.ingredientsCost, currency)}</b>
-                      </div>
-                      <div className="text-zinc-700">
-                        Total cost: <b>{money(preview.totalCost, currency)}</b>
-                      </div>
-                      <div className="text-zinc-700">
-                        Unit cost: <b>{money(preview.unitCost, currency)}</b> /{" "}
-                        {unitLabel(yieldUnit)}
-                      </div>
-                      <div className="text-zinc-700">
-                        Precio sugerido:{" "}
-                        <b>
-                          {preview.suggestedPrice == null
-                            ? "—"
-                            : money(preview.suggestedPrice, currency)}
-                        </b>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-zinc-500">
-                      Agregá items para ver preview.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </CardBody>
-          )}
-        </Card>
-
-        {/* List */}
-        <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-          <table className="min-w-full">
-            <thead className="bg-zinc-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Producto
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Categoría
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Costo unit
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Precio
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Estado
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-zinc-100">
-              {filteredProducts.map((p) => {
-                const catLabel =
-                  p.categoryName ||
-                  (p.categoryId
-                    ? activeCategories.find((c) => c.id === p.categoryId)?.name
-                    : null) ||
-                  "—";
-
-                const ccy = (p.currency || "ARS") as Currency;
-                const unitCost = Number(p.computed?.unitCost ?? 0) || 0;
-                const totalCost = Number(p.computed?.totalCost ?? 0) || 0;
-
-                const price =
-                  p.salePrice != null
-                    ? money(p.salePrice, ccy)
-                    : p.computed?.suggestedPrice != null
-                    ? money(p.computed.suggestedPrice, ccy)
-                    : "—";
-
-                const gm =
-                  p.salePrice != null && p.computed?.grossMarginPct != null
-                    ? pct(p.computed.grossMarginPct)
-                    : "—";
-
-                return (
-                  <tr key={p.id} className="hover:bg-zinc-50">
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-zinc-900">{p.name}</div>
-                      <div className="mt-0.5 text-xs text-zinc-500">
-                        Yield: <b>{p.yieldQty}</b> {unitLabel(p.yieldUnit)} · Items:{" "}
-                        <b>{p.items?.length ?? 0}</b>
-                      </div>
-                      {(p.sku || p.barcode) && (
-                        <div className="mt-0.5 text-xs text-zinc-500">
-                          {p.sku ? (
-                            <span>
-                              SKU: <b>{p.sku}</b>
-                            </span>
-                          ) : null}
-                          {p.sku && p.barcode ? " · " : null}
-                          {p.barcode ? (
-                            <span>
-                              BAR: <b>{p.barcode}</b>
-                            </span>
-                          ) : null}
+                  return (
+                    <div key={p.id} className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-zinc-900">
+                            {p.name}
+                          </div>
+                          <div className="mt-0.5 text-xs text-zinc-500">
+                            Yield: <b>{p.yieldQty}</b> {unitLabel(p.yieldUnit)}{" "}
+                            · Items: <b>{p.items?.length ?? 0}</b>
+                          </div>
                         </div>
-                      )}
-                      {p.tags?.length ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {p.tags.slice(0, 4).map((t) => (
-                            <span
-                              key={t}
-                              className="inline-flex rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700"
-                            >
-                              {t}
-                            </span>
-                          ))}
-                          {p.tags.length > 4 && (
-                            <span className="text-xs text-zinc-400">
-                              +{p.tags.length - 4}
-                            </span>
-                          )}
-                        </div>
-                      ) : null}
-                    </td>
-
-                    <td className="px-4 py-3 text-sm">{catLabel}</td>
-
-                    <td className="px-4 py-3 text-sm">
-                      <div className="font-semibold">{money(unitCost, ccy)}</div>
-                      <div className="text-xs text-zinc-500">
-                        Total: {money(totalCost, ccy)}
+                        <StatusPill active={p.isActive} />
                       </div>
-                    </td>
 
-                    <td className="px-4 py-3 text-sm">
-                      <div className="font-semibold">{price}</div>
-                      <div className="text-xs text-zinc-500">Margen: {gm}</div>
-                    </td>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                          <div className="text-xs text-zinc-500">
+                            Costo unit
+                          </div>
+                          <div className="font-semibold text-zinc-900">
+                            {money(unitCost, ccy)}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                          <div className="text-xs text-zinc-500">Precio</div>
+                          <div className="font-semibold text-zinc-900">
+                            {price}
+                          </div>
+                        </div>
+                      </div>
 
-                    <td className="px-4 py-3">
-                      <StatusPill active={p.isActive} />
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           variant="secondary"
                           onClick={() => openDetails(p)}
                           disabled={busy}
                         >
                           <Layers className="h-4 w-4" />
-                          Detalles
+                          Editar
                         </Button>
-
                         <Button
                           variant="secondary"
                           onClick={() => recompute(p)}
@@ -1661,38 +1791,21 @@ export default function AdminProductsPage() {
                           <RotateCcw className="h-4 w-4" />
                           Recompute
                         </Button>
-
                         <Button
                           variant={p.isActive ? "danger" : "secondary"}
                           onClick={() => toggleActive(p)}
                           disabled={busy}
                         >
                           <Power className="h-4 w-4" />
-                          {p.isActive ? "Desactivar" : "Reactivar"}
+                          {p.isActive ? "Off" : "On"}
                         </Button>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {!loading && filteredProducts.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-sm text-zinc-500">
-                    No hay productos para mostrar.
-                  </td>
-                </tr>
+                    </div>
+                  );
+                })
               )}
-
-              {loading && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-sm text-zinc-500">
-                    Cargando…
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
 
         <div className="text-xs text-zinc-500">
@@ -1700,72 +1813,72 @@ export default function AdminProductsPage() {
           productos.
         </div>
 
-        {/* Details Drawer */}
-        {detailsOpen && selected && (
-          <div className="fixed inset-0 z-50">
-            {/* backdrop */}
-            <button
-              className="absolute inset-0 bg-black/30"
-              onClick={closeDetails}
-              aria-label="Cerrar"
-            />
+        {/* Floating action button (mobile) */}
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          disabled={busy}
+          className={cn(
+            "md:hidden fixed bottom-5 right-5 z-40",
+            "rounded-full shadow-lg border border-zinc-200 bg-zinc-900 text-white",
+            "h-12 w-12 flex items-center justify-center",
+            busy && "opacity-50"
+          )}
+          aria-label="Crear producto"
+          title={"Crear producto"}
+        >
+          <Plus className="h-5 w-5" />
+        </button>
 
-            {/* panel */}
-            <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl border-l border-zinc-200">
-              <div className="flex items-start justify-between gap-3 p-5 border-b">
-                <div>
-                  <div className="text-xs text-zinc-500">Detalles de producto</div>
-                  <div className="text-lg font-semibold text-zinc-900">
-                    {selected.name}
-                  </div>
-                  <div className="mt-1 text-xs text-zinc-500">
-                    ID: <span className="font-mono">{selected.id}</span>
-                  </div>
-                </div>
+        {/* Create Drawer */}
+        <Drawer
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          title="Crear producto"
+          subtitle="Nuevo"
+          widthClass="max-w-4xl"
+          footer={CreateFooter}
+        >
+          {CreateContent}
+        </Drawer>
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => recompute(selected)}
-                    disabled={busy}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Recompute
-                  </Button>
-
-                  <Button
-                    variant={selected.isActive ? "danger" : "secondary"}
-                    onClick={() => toggleActive(selected)}
-                    disabled={busy}
-                  >
-                    <Power className="h-4 w-4" />
-                    {selected.isActive ? "Desactivar" : "Reactivar"}
-                  </Button>
-
-                  <Button variant="ghost" onClick={closeDetails}>
-                    ✕
-                  </Button>
-                </div>
+        {/* Edit Drawer (mejorado: layout 2 columnas en desktop) */}
+        <Drawer
+          open={detailsOpen && !!selected}
+          onClose={closeDetails}
+          title={selected?.name || "Editar producto"}
+          subtitle="Detalles / Edición"
+          widthClass="max-w-5xl"
+          footer={
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-zinc-500">
+                Guardar = PATCH /products/:id (incluye items).
               </div>
-
-              <div className="h-[calc(100%-72px)] overflow-auto p-5 space-y-6">
-                {/* basic */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={closeDetails}
+                  disabled={busy}
+                >
+                  Cancelar
+                </Button>
+                <Button onClick={saveEdits} disabled={busy || !editName.trim()}>
+                  Guardar cambios
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          {selected ? (
+            <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+              {/* Main */}
+              <div className="space-y-6">
                 <div className="grid gap-4 md:grid-cols-6">
-                  <Field label="Sucursal (Branch)">
-                    <Select
-                      value={editBranchId}
-                      onChange={(e) => setEditBranchId(e.target.value)}
-                    >
-                      {activeBranches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-
                   <Field label="Nombre">
-                    <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                    />
                   </Field>
 
                   <Field label="Categoría">
@@ -1783,7 +1896,10 @@ export default function AdminProductsPage() {
                   </Field>
 
                   <Field label="SKU">
-                    <Input value={editSku} onChange={(e) => setEditSku(e.target.value)} />
+                    <Input
+                      value={editSku}
+                      onChange={(e) => setEditSku(e.target.value)}
+                    />
                   </Field>
 
                   <Field label="Barcode">
@@ -1817,13 +1933,13 @@ export default function AdminProductsPage() {
                   />
                 </Field>
 
-                {/* recipe & cost */}
                 <div className="grid gap-4 md:grid-cols-6">
                   <Field label="Yield Qty">
                     <Input
                       value={editYieldQty}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setEditYieldQty(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setEditYieldQty(e.target.value)
                       }
                     />
                   </Field>
@@ -1843,7 +1959,8 @@ export default function AdminProductsPage() {
                     <Input
                       value={editWastePct}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setEditWastePct(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setEditWastePct(e.target.value)
                       }
                     />
                   </Field>
@@ -1852,7 +1969,8 @@ export default function AdminProductsPage() {
                     <Input
                       value={editExtraCost}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setEditExtraCost(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setEditExtraCost(e.target.value)
                       }
                     />
                   </Field>
@@ -1883,7 +2001,8 @@ export default function AdminProductsPage() {
                     <Input
                       value={editSalePrice}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setEditSalePrice(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setEditSalePrice(e.target.value)
                       }
                     />
                   </Field>
@@ -1892,7 +2011,8 @@ export default function AdminProductsPage() {
                     <Input
                       value={editMarginPct}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setEditMarginPct(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setEditMarginPct(e.target.value)
                       }
                     />
                   </Field>
@@ -1928,8 +2048,28 @@ export default function AdminProductsPage() {
 
                 {/* items */}
                 <div className="rounded-2xl border border-zinc-200 p-4">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                    <Layers className="h-4 w-4" /> Composición (items)
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                      <Layers className="h-4 w-4" /> Composición (items)
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => recompute(selected)}
+                        disabled={busy}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Recompute
+                      </Button>
+                      <Button
+                        variant={selected.isActive ? "danger" : "secondary"}
+                        onClick={() => toggleActive(selected)}
+                        disabled={busy}
+                      >
+                        <Power className="h-4 w-4" />
+                        {selected.isActive ? "Desactivar" : "Reactivar"}
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="mt-3 grid gap-3 md:grid-cols-6">
@@ -1959,7 +2099,8 @@ export default function AdminProductsPage() {
                       <Input
                         value={editAddQty}
                         onChange={(e) =>
-                          isValidNumberDraft(e.target.value) && setEditAddQty(e.target.value)
+                          isValidNumberDraft(e.target.value) &&
+                          setEditAddQty(e.target.value)
                         }
                       />
                     </Field>
@@ -2010,10 +2151,12 @@ export default function AdminProductsPage() {
                         {editItemsDraft.map((it, idx) => {
                           const label =
                             it.type === "INGREDIENT"
-                              ? activeIngredients.find((x) => x.id === it.ingredientId)?.name ||
-                                "—"
-                              : activePreparations.find((x) => x.id === it.preparationId)?.name ||
-                                "—";
+                              ? activeIngredients.find(
+                                  (x) => x.id === it.ingredientId
+                                )?.name || "—"
+                              : activePreparations.find(
+                                  (x) => x.id === it.preparationId
+                                )?.name || "—";
 
                           return (
                             <tr key={idx} className="hover:bg-zinc-50">
@@ -2022,19 +2165,26 @@ export default function AdminProductsPage() {
                               <td className="px-4 py-3">
                                 <Input
                                   value={it.qty}
-                                  onChange={(e) => editSetItemQty(idx, e.target.value)}
+                                  onChange={(e) =>
+                                    editSetItemQty(idx, e.target.value)
+                                  }
                                   className="w-28"
                                 />
                               </td>
                               <td className="px-4 py-3">
                                 <Input
                                   value={it.note ?? ""}
-                                  onChange={(e) => editSetItemNote(idx, e.target.value)}
+                                  onChange={(e) =>
+                                    editSetItemNote(idx, e.target.value)
+                                  }
                                   placeholder="—"
                                 />
                               </td>
                               <td className="px-4 py-3">
-                                <Button variant="ghost" onClick={() => editRemoveItem(idx)}>
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => editRemoveItem(idx)}
+                                >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </td>
@@ -2044,7 +2194,10 @@ export default function AdminProductsPage() {
 
                         {editItemsDraft.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-4 py-6 text-sm text-zinc-500">
+                            <td
+                              colSpan={5}
+                              className="px-4 py-6 text-sm text-zinc-500"
+                            >
                               Agregá ingredientes o preparaciones.
                             </td>
                           </tr>
@@ -2053,10 +2206,14 @@ export default function AdminProductsPage() {
                     </table>
                   </div>
                 </div>
+              </div>
 
-                {/* computed read-only */}
+              {/* Right sidebar: computed read-only */}
+              <div className="space-y-4">
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
-                  <div className="font-semibold text-zinc-900">Costos calculados (backend)</div>
+                  <div className="font-semibold text-zinc-900">
+                    Costos calculados (backend)
+                  </div>
                   <div className="mt-2 grid gap-1 text-zinc-700">
                     <div>
                       Ingredients cost:{" "}
@@ -2091,7 +2248,10 @@ export default function AdminProductsPage() {
                       <b>
                         {selected.computed?.suggestedPrice == null
                           ? "—"
-                          : money(selected.computed.suggestedPrice, selected.currency || "ARS")}
+                          : money(
+                              selected.computed.suggestedPrice,
+                              selected.currency || "ARS"
+                            )}
                       </b>
                     </div>
                     <div>
@@ -2112,27 +2272,37 @@ export default function AdminProductsPage() {
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* footer */}
-              <div className="absolute bottom-0 left-0 right-0 border-t bg-white p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-zinc-500">
-                    Guardar = PATCH /products/:id (incluye items).
+                <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm">
+                  <div className="font-semibold text-zinc-900">
+                    Acciones rápidas
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="secondary" onClick={closeDetails} disabled={busy}>
-                      Cancelar
+                  <div className="mt-3 grid gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => recompute(selected)}
+                      disabled={busy}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Recompute
                     </Button>
-                    <Button onClick={saveEdits} disabled={busy || !editName.trim() || !editBranchId}>
-                      Guardar cambios
+                    <Button
+                      variant={selected.isActive ? "danger" : "secondary"}
+                      onClick={() => toggleActive(selected)}
+                      disabled={busy}
+                    >
+                      <Power className="h-4 w-4" />
+                      {selected.isActive ? "Desactivar" : "Reactivar"}
                     </Button>
+                  </div>
+                  <div className="mt-3 text-xs text-zinc-500">
+                    ID: <span className="font-mono">{selected.id}</span>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          ) : null}
+        </Drawer>
       </div>
     </AdminProtected>
   );

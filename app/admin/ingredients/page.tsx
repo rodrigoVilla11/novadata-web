@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
@@ -24,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 
-/* ============================================================================
+/* =============================================================================
  * Types
  * ========================================================================== */
 
@@ -62,7 +69,7 @@ type Ingredient = {
   updatedAt?: string;
 };
 
-/* ============================================================================
+/* =============================================================================
  * Helpers
  * ========================================================================== */
 
@@ -89,6 +96,27 @@ function parseTags(raw: string) {
     .map((t) => t.toLowerCase());
 }
 
+function normNum(s: string) {
+  const n = Number(s || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isDirtyMin(p: Ingredient, draft: string | undefined) {
+  const cur = p.stock?.minQty ?? 0;
+  return normNum(draft ?? String(cur)) !== cur;
+}
+
+function isDirtyCost(p: Ingredient, draft: string | undefined) {
+  const cur = p.cost?.lastCost ?? 0;
+  return normNum(draft ?? String(cur)) !== cur;
+}
+
+function isDirtyNameForSupplier(p: Ingredient, draft: string | undefined) {
+  const cur = (p.name_for_supplier ?? "").trim();
+  const d = (draft ?? cur).trim();
+  return d !== cur;
+}
+
 function StatusPill({ active }: { active: boolean }) {
   return (
     <span
@@ -109,7 +137,7 @@ function Notice({
   children,
 }: {
   tone: "error" | "ok";
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div
@@ -138,7 +166,7 @@ function MiniKpi({
   tone = "default",
 }: {
   label: string;
-  value: React.ReactNode;
+  value: ReactNode;
   tone?: "default" | "ok" | "warn";
 }) {
   return (
@@ -158,7 +186,7 @@ function MiniKpi({
   );
 }
 
-/* ============================================================================
+/* =============================================================================
  * Page
  * ========================================================================== */
 
@@ -166,7 +194,7 @@ export default function AdminIngredientsPage() {
   const { getAccessToken } = useAuth();
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierId, setSupplierId] = useState<string>("__ALL__"); // ✅ ahora ALL por defecto
+  const [supplierId, setSupplierId] = useState<string>("__ALL__"); // ✅ ALL por defecto
 
   const [items, setItems] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,6 +202,9 @@ export default function AdminIngredientsPage() {
 
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+
+  // row editor
+  const [openRow, setOpenRow] = useState<string | null>(null);
 
   // create
   const [createOpen, setCreateOpen] = useState(true);
@@ -215,7 +246,7 @@ export default function AdminIngredientsPage() {
     [suppliers]
   );
 
-  // ✅ ahora el filtro por proveedor es LOCAL (front), no en el fetch
+  // ✅ filtro por proveedor es LOCAL (front), no en el fetch
   const supplierMap = useMemo(() => {
     const m = new Map<string, Supplier>();
     for (const s of suppliers) m.set(s.id, s);
@@ -230,24 +261,27 @@ export default function AdminIngredientsPage() {
   const filtered = useMemo(() => {
     let base = items;
 
-    // filtro por proveedor (opcional)
     if (supplierId !== "__ALL__") {
       base = base.filter((i) => i.supplierId === supplierId);
     }
 
-    // filtro activos
     if (onlyActive) base = base.filter((i) => i.isActive);
 
-    // search
     const qq = q.trim().toLowerCase();
     if (!qq) return base;
 
     return base.filter((i) => {
       const a = (i.name || "").toLowerCase();
       const b = (i.name_for_supplier || "").toLowerCase();
-      const tags = (i.tags || []).some((t) => (t || "").toLowerCase().includes(qq));
-      const supplierName = (supplierMap.get(i.supplierId)?.name || "").toLowerCase();
-      return a.includes(qq) || b.includes(qq) || tags || supplierName.includes(qq);
+      const tags = (i.tags || []).some((t) =>
+        (t || "").toLowerCase().includes(qq)
+      );
+      const supplierName = (
+        supplierMap.get(i.supplierId)?.name || ""
+      ).toLowerCase();
+      return (
+        a.includes(qq) || b.includes(qq) || tags || supplierName.includes(qq)
+      );
     });
   }, [items, supplierId, onlyActive, q, supplierMap]);
 
@@ -257,43 +291,52 @@ export default function AdminIngredientsPage() {
     return { total, active, inactive: total - active };
   }, [items]);
 
-  // KPIs sobre lo filtrado (para que tenga sentido con filtros)
   const filteredTotals = useMemo(() => {
     const total = filtered.length;
     const active = filtered.filter((p) => p.isActive).length;
     return { total, active, inactive: total - active };
   }, [filtered]);
 
-  /* ============================================================================
+  /* =============================================================================
    * Loaders
    * ========================================================================== */
 
   async function loadSuppliers() {
     const s = await apiFetchAuthed<Supplier[]>(getAccessToken, "/suppliers");
-    setSuppliers(s);
+    setSuppliers(Array.isArray(s) ? s : []);
   }
 
-  // ✅ ahora trae TODO: /ingredients (sin supplierId)
+  // ✅ trae TODO /ingredients
   async function loadIngredientsAll() {
-    const data = await apiFetchAuthed<Ingredient[]>(getAccessToken, `/ingredients`);
-    setItems(data);
+    const data = await apiFetchAuthed<Ingredient[]>(
+      getAccessToken,
+      "/ingredients"
+    );
+    const list = Array.isArray(data) ? data : [];
+    setItems(list);
 
-    // drafts
+    // drafts (solo setear si faltan, no pisar lo que el user está editando)
     setMinDraft((prev) => {
       const next = { ...prev };
-      for (const it of data) if (next[it.id] === undefined) next[it.id] = String(it.stock?.minQty ?? 0);
+      for (const it of list)
+        if (next[it.id] === undefined)
+          next[it.id] = String(it.stock?.minQty ?? 0);
       return next;
     });
 
     setNameForSupplierDraft((prev) => {
       const next = { ...prev };
-      for (const it of data) if (next[it.id] === undefined) next[it.id] = String(it.name_for_supplier ?? "");
+      for (const it of list)
+        if (next[it.id] === undefined)
+          next[it.id] = String(it.name_for_supplier ?? "");
       return next;
     });
 
     setLastCostDraft((prev) => {
       const next = { ...prev };
-      for (const it of data) if (next[it.id] === undefined) next[it.id] = String(it.cost?.lastCost ?? 0);
+      for (const it of list)
+        if (next[it.id] === undefined)
+          next[it.id] = String(it.cost?.lastCost ?? 0);
       return next;
     });
   }
@@ -302,11 +345,10 @@ export default function AdminIngredientsPage() {
     setErr(null);
     setOk(null);
     setLoading(true);
-
     try {
       await Promise.all([loadSuppliers(), loadIngredientsAll()]);
       setOk("Datos actualizados ✔");
-      setTimeout(() => setOk(null), 1500);
+      window.setTimeout(() => setOk(null), 1500);
     } catch (e: any) {
       setErr(e?.message || "Error cargando");
     } finally {
@@ -319,14 +361,13 @@ export default function AdminIngredientsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ============================================================================
+  /* =============================================================================
    * Actions
    * ========================================================================== */
 
   async function create() {
     if (!name.trim()) return;
 
-    // ✅ ahora: si estás en "Todos", obligamos a elegir proveedor para crear
     const sId = supplierId === "__ALL__" ? "" : supplierId;
     if (!sId) {
       setErr("Elegí un proveedor para crear el ingrediente.");
@@ -356,7 +397,9 @@ export default function AdminIngredientsPage() {
           name: name.trim(),
           baseUnit,
           supplierId: sId,
-          name_for_supplier: nameForSupplier.trim() ? nameForSupplier.trim() : null,
+          name_for_supplier: nameForSupplier.trim()
+            ? nameForSupplier.trim()
+            : null,
           minQty,
           lastCost,
           currency: currencyCreate,
@@ -373,7 +416,7 @@ export default function AdminIngredientsPage() {
       setTagsCreate("");
 
       setOk("Ingrediente creado ✔");
-      setTimeout(() => setOk(null), 1500);
+      window.setTimeout(() => setOk(null), 1500);
 
       await loadIngredientsAll();
       searchRef.current?.focus();
@@ -417,11 +460,27 @@ export default function AdminIngredientsPage() {
   }
 
   function setCostValue(id: string, v: string) {
-    if (isValidNumberDraft(v)) setLastCostDraft((prev) => ({ ...prev, [id]: v }));
+    if (isValidNumberDraft(v))
+      setLastCostDraft((prev) => ({ ...prev, [id]: v }));
   }
 
   function setNameForSupplierValue(id: string, v: string) {
     setNameForSupplierDraft((prev) => ({ ...prev, [id]: v }));
+  }
+
+  function resetRowDrafts(p: Ingredient) {
+    setNameForSupplierDraft((prev) => ({
+      ...prev,
+      [p.id]: String(p.name_for_supplier ?? ""),
+    }));
+    setLastCostDraft((prev) => ({
+      ...prev,
+      [p.id]: String(p.cost?.lastCost ?? 0),
+    }));
+    setMinDraft((prev) => ({
+      ...prev,
+      [p.id]: String(p.stock?.minQty ?? 0),
+    }));
   }
 
   async function saveMin(p: Ingredient) {
@@ -443,7 +502,7 @@ export default function AdminIngredientsPage() {
       });
       await loadIngredientsAll();
       setOk("Mínimo guardado ✔");
-      setTimeout(() => setOk(null), 1200);
+      window.setTimeout(() => setOk(null), 1200);
     } catch (e: any) {
       setErr(e?.message || "Error guardando mínimo");
     } finally {
@@ -458,14 +517,18 @@ export default function AdminIngredientsPage() {
     setErr(null);
 
     try {
-      await apiFetchAuthed(getAccessToken, `/ingredients/${p.id}/name-for-supplier`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name_for_supplier: v ? v : null }),
-      });
+      await apiFetchAuthed(
+        getAccessToken,
+        `/ingredients/${p.id}/name-for-supplier`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name_for_supplier: v ? v : null }),
+        }
+      );
       await loadIngredientsAll();
       setOk("Nombre proveedor guardado ✔");
-      setTimeout(() => setOk(null), 1200);
+      window.setTimeout(() => setOk(null), 1200);
     } catch (e: any) {
       setErr(e?.message || "Error guardando nombre proveedor");
     } finally {
@@ -492,7 +555,7 @@ export default function AdminIngredientsPage() {
       });
       await loadIngredientsAll();
       setOk("Costo guardado ✔");
-      setTimeout(() => setOk(null), 1200);
+      window.setTimeout(() => setOk(null), 1200);
     } catch (e: any) {
       setErr(e?.message || "Error guardando costo");
     } finally {
@@ -500,7 +563,69 @@ export default function AdminIngredientsPage() {
     }
   }
 
-  /* ============================================================================
+  // ⭐ Guardar SOLO lo que cambió en la fila
+  async function saveRow(p: Ingredient) {
+    const dirtyMin = isDirtyMin(p, minDraft[p.id]);
+    const dirtyCost = isDirtyCost(p, lastCostDraft[p.id]);
+    const dirtyName = isDirtyNameForSupplier(p, nameForSupplierDraft[p.id]);
+
+    if (!dirtyMin && !dirtyCost && !dirtyName) return;
+
+    setBusy(true);
+    setErr(null);
+
+    try {
+      const calls: Promise<any>[] = [];
+
+      if (dirtyName) {
+        const v = (nameForSupplierDraft[p.id] ?? "").trim();
+        calls.push(
+          apiFetchAuthed(
+            getAccessToken,
+            `/ingredients/${p.id}/name-for-supplier`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name_for_supplier: v ? v : null }),
+            }
+          )
+        );
+      }
+
+      if (dirtyCost) {
+        const lastCost = normNum(lastCostDraft[p.id] ?? "0");
+        calls.push(
+          apiFetchAuthed(getAccessToken, `/ingredients/${p.id}/cost`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lastCost }),
+          })
+        );
+      }
+
+      if (dirtyMin) {
+        const minQty = normNum(minDraft[p.id] ?? "0");
+        calls.push(
+          apiFetchAuthed(getAccessToken, `/ingredients/${p.id}/min-qty`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ minQty }),
+          })
+        );
+      }
+
+      await Promise.all(calls);
+      await loadIngredientsAll();
+      setOk("Cambios guardados ✔");
+      window.setTimeout(() => setOk(null), 1200);
+    } catch (e: any) {
+      setErr(e?.message || "Error guardando cambios");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* =============================================================================
    * Render
    * ========================================================================== */
 
@@ -519,11 +644,21 @@ export default function AdminIngredientsPage() {
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <MiniKpi label="Proveedor (filtro)" value={currentSupplierName} />
+                <MiniKpi
+                  label="Proveedor (filtro)"
+                  value={currentSupplierName}
+                />
                 <MiniKpi label="Total (DB)" value={totals.total} />
                 <MiniKpi label="Mostrando" value={filteredTotals.total} />
-                <MiniKpi label="Activos (mostrando)" value={filteredTotals.active} tone="ok" />
-                <MiniKpi label="Inactivos (mostrando)" value={filteredTotals.inactive} />
+                <MiniKpi
+                  label="Activos (mostrando)"
+                  value={filteredTotals.active}
+                  tone="ok"
+                />
+                <MiniKpi
+                  label="Inactivos (mostrando)"
+                  value={filteredTotals.inactive}
+                />
               </div>
             </div>
 
@@ -545,12 +680,15 @@ export default function AdminIngredientsPage() {
 
         {/* Filters */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <div className="grid gap-2 sm:grid-cols-[300px_1fr_auto] sm:items-center">
+          <div className="grid gap-2 sm:grid-cols-[320px_1fr_auto] sm:items-center">
             <div className="relative">
               <Truck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Select
                 value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value)}
+                onChange={(e) => {
+                  setSupplierId(e.target.value);
+                  setOpenRow(null);
+                }}
                 className="pl-9"
               >
                 <option value="__ALL__">Todos los proveedores</option>
@@ -564,7 +702,10 @@ export default function AdminIngredientsPage() {
               {supplierId !== "__ALL__" && (
                 <button
                   type="button"
-                  onClick={() => setSupplierId("__ALL__")}
+                  onClick={() => {
+                    setSupplierId("__ALL__");
+                    setOpenRow(null);
+                  }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 hover:bg-zinc-100"
                   title="Quitar filtro proveedor"
                 >
@@ -576,6 +717,7 @@ export default function AdminIngredientsPage() {
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Input
+                ref={searchRef}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Buscar por nombre / proveedor / tags…"
@@ -615,7 +757,11 @@ export default function AdminIngredientsPage() {
               onClick={() => setCreateOpen((v) => !v)}
               className="rounded-xl border px-3 py-2 text-sm hover:bg-zinc-50 inline-flex items-center gap-2"
             >
-              {createOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {createOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
               {createOpen ? "Ocultar" : "Mostrar"}
             </button>
           </div>
@@ -624,13 +770,17 @@ export default function AdminIngredientsPage() {
             <CardBody>
               {supplierId === "__ALL__" && (
                 <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Elegí un proveedor para poder crear (así evitamos ingredientes sin supplier).
+                  Elegí un proveedor para poder crear (así evitamos ingredientes
+                  sin supplier).
                 </div>
               )}
 
               <div className="grid gap-4 md:grid-cols-6">
                 <Field label="Nombre (interno)">
-                  <Input value={name} onChange={(e) => setName(e.target.value)} />
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
                 </Field>
 
                 <Field label="Nombre en proveedor">
@@ -642,7 +792,10 @@ export default function AdminIngredientsPage() {
                 </Field>
 
                 <Field label="Unidad base">
-                  <Select value={baseUnit} onChange={(e) => setBaseUnit(e.target.value as Unit)}>
+                  <Select
+                    value={baseUnit}
+                    onChange={(e) => setBaseUnit(e.target.value as Unit)}
+                  >
                     <option value="UNIT">Unidad</option>
                     <option value="KG">Kg</option>
                     <option value="L">Litros</option>
@@ -653,7 +806,8 @@ export default function AdminIngredientsPage() {
                   <Input
                     value={minQtyCreate}
                     onChange={(e) =>
-                      isValidNumberDraft(e.target.value) && setMinQtyCreate(e.target.value)
+                      isValidNumberDraft(e.target.value) &&
+                      setMinQtyCreate(e.target.value)
                     }
                   />
                 </Field>
@@ -662,10 +816,11 @@ export default function AdminIngredientsPage() {
                   <div className="relative">
                     <BadgeDollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <Input
-                      className="pl-9"
+                      className="pl-9 tabular-nums"
                       value={lastCostCreate}
                       onChange={(e) =>
-                        isValidNumberDraft(e.target.value) && setLastCostCreate(e.target.value)
+                        isValidNumberDraft(e.target.value) &&
+                        setLastCostCreate(e.target.value)
                       }
                     />
                   </div>
@@ -674,7 +829,9 @@ export default function AdminIngredientsPage() {
                 <Field label="Moneda">
                   <Select
                     value={currencyCreate}
-                    onChange={(e) => setCurrencyCreate(e.target.value as "ARS" | "USD")}
+                    onChange={(e) =>
+                      setCurrencyCreate(e.target.value as "ARS" | "USD")
+                    }
                   >
                     <option value="ARS">ARS</option>
                     <option value="USD">USD</option>
@@ -712,22 +869,13 @@ export default function AdminIngredientsPage() {
         {/* List */}
         <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
           <table className="min-w-full">
-            <thead className="bg-zinc-50">
+            <thead className="bg-zinc-50 sticky top-0 z-10">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
                   Ingrediente
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Proveedor
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Unidad
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Costo
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                  Mínimo
+                  Proveedor / Unidad / Moneda
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
                   Estado
@@ -746,116 +894,338 @@ export default function AdminIngredientsPage() {
 
                 const supplierName = supplierMap.get(p.supplierId)?.name ?? "—";
 
+                const dirtyMin = isDirtyMin(p, minDraft[p.id]);
+                const dirtyCost = isDirtyCost(p, lastCostDraft[p.id]);
+                const dirtyName = isDirtyNameForSupplier(
+                  p,
+                  nameForSupplierDraft[p.id]
+                );
+                const dirtyAny = dirtyMin || dirtyCost || dirtyName;
+
+                const isOpen = openRow === p.id;
+
                 return (
-                  <tr key={p.id} className="hover:bg-zinc-50">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-zinc-900">{p.name}</div>
-                      {p.tags?.length ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {p.tags.slice(0, 3).map((t) => (
-                            <span
-                              key={t}
-                              className="inline-flex rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600"
-                            >
-                              {t}
-                            </span>
-                          ))}
-                          {p.tags.length > 3 && (
-                            <span className="text-[11px] text-zinc-400">
-                              +{p.tags.length - 3}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="mt-1 text-[11px] text-zinc-400">Sin tags</div>
+                  <Fragment key={p.id}>
+                    {/* Compact row */}
+                    <tr
+                      className={cn(
+                        "hover:bg-zinc-50",
+                        isOpen && "bg-zinc-50/40"
                       )}
-                    </td>
+                    >
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-medium text-zinc-900">
+                              {p.name}
+                            </div>
 
-                    <td className="px-4 py-3">
-                      <div className="text-sm text-zinc-900">{supplierName}</div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <input
-                          className="w-64 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-4 focus:ring-emerald-100"
-                          value={nameForSupplierDraft[p.id] ?? ""}
-                          onChange={(e) => setNameForSupplierValue(p.id, e.target.value)}
-                          placeholder="Nombre en proveedor…"
-                        />
-                        <Button
-                          variant="secondary"
-                          loading={savingName}
-                          onClick={() => saveNameForSupplier(p)}
-                          title="Guardar nombre proveedor"
-                        >
-                          <Save className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
+                            {p.tags?.length ? (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {p.tags.slice(0, 3).map((t) => (
+                                  <span
+                                    key={t}
+                                    className="inline-flex rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600"
+                                  >
+                                    {t}
+                                  </span>
+                                ))}
+                                {p.tags.length > 3 && (
+                                  <span className="text-[11px] text-zinc-400">
+                                    +{p.tags.length - 3}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-1 text-[11px] text-zinc-400">
+                                Sin tags
+                              </div>
+                            )}
+                          </div>
 
-                    <td className="px-4 py-3 text-sm text-zinc-900">
-                      {unitLabel(p.baseUnit)}
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <BadgeDollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                          <input
-                            className="w-32 rounded-xl border border-zinc-200 px-3 py-2 pl-9 text-sm text-zinc-900 focus:outline-none focus:ring-4 focus:ring-emerald-100"
-                            value={lastCostDraft[p.id] ?? "0"}
-                            onChange={(e) => setCostValue(p.id, e.target.value)}
-                          />
+                          <button
+                            type="button"
+                            onClick={() => setOpenRow(isOpen ? null : p.id)}
+                            className={cn(
+                              "rounded-xl border px-3 py-2 text-sm font-semibold inline-flex items-center gap-2",
+                              isOpen
+                                ? "border-zinc-300 bg-zinc-50"
+                                : "border-zinc-200 bg-white hover:bg-zinc-50"
+                            )}
+                          >
+                            {isOpen ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                            Editar
+                            {dirtyAny && (
+                              <span className="ml-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                cambios
+                              </span>
+                            )}
+                          </button>
                         </div>
-                        <Button
-                          variant="secondary"
-                          loading={savingCost}
-                          onClick={() => saveCost(p)}
-                          title="Guardar costo"
-                        >
-                          <Save className="h-4 w-4" />
-                        </Button>
-                        <span className="text-xs text-zinc-500">{p.cost?.currency ?? "ARS"}</span>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <input
-                          className="w-28 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-4 focus:ring-emerald-100"
-                          value={minDraft[p.id] ?? "0"}
-                          onChange={(e) => setMinValue(p.id, e.target.value)}
-                        />
-                        <Button
-                          variant="secondary"
-                          loading={savingMin}
-                          onClick={() => saveMin(p)}
-                          title="Guardar mínimo"
-                        >
-                          <Save className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="text-sm font-semibold text-zinc-900">
+                          {supplierName}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          {unitLabel(p.baseUnit)} · {p.cost?.currency ?? "ARS"}
+                        </div>
+                        <div className="mt-2 text-xs text-zinc-500">
+                          Costo:{" "}
+                          <span className="font-semibold text-zinc-900 tabular-nums">
+                            {String(p.cost?.lastCost ?? 0)}
+                          </span>{" "}
+                          · Mínimo:{" "}
+                          <span className="font-semibold text-zinc-900 tabular-nums">
+                            {String(p.stock?.minQty ?? 0)}
+                          </span>
+                        </div>
+                      </td>
 
-                    <td className="px-4 py-3">
-                      <StatusPill active={p.isActive} />
-                    </td>
+                      <td className="px-4 py-3 align-top">
+                        <StatusPill active={p.isActive} />
+                      </td>
 
-                    <td className="px-4 py-3">
-                      <Button
-                        variant={p.isActive ? "danger" : "secondary"}
-                        onClick={() => toggleActive(p)}
-                        disabled={busy}
-                      >
-                        <Power className="h-4 w-4" />
-                        {p.isActive ? "Desactivar" : "Reactivar"}
-                      </Button>
-                    </td>
-                  </tr>
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            variant={p.isActive ? "danger" : "secondary"}
+                            onClick={() => toggleActive(p)}
+                            disabled={busy}
+                          >
+                            <Power className="h-4 w-4" />
+                            {p.isActive ? "Desactivar" : "Reactivar"}
+                          </Button>
+
+                          <Button
+                            variant="secondary"
+                            onClick={() => {
+                              resetRowDrafts(p);
+                              setOk("Cambios descartados ✔");
+                              window.setTimeout(() => setOk(null), 900);
+                            }}
+                            disabled={!dirtyAny || busy}
+                            title={
+                              !dirtyAny ? "Sin cambios" : "Descartar cambios"
+                            }
+                          >
+                            <X className="h-4 w-4" />
+                            Descartar
+                          </Button>
+
+                          <Button
+                            onClick={() => saveRow(p)}
+                            disabled={!dirtyAny || busy}
+                            title={
+                              !dirtyAny
+                                ? "Sin cambios"
+                                : "Guardar cambios de la fila"
+                            }
+                          >
+                            <Save className="h-4 w-4" />
+                            Guardar cambios
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Expanded editor */}
+                    {isOpen && (
+                      <tr className="bg-zinc-50/40">
+                        <td colSpan={4} className="px-4 pb-5">
+                          <div className="mt-3 grid gap-3 md:grid-cols-3">
+                            {/* Nombre proveedor */}
+                            <div className="rounded-2xl border border-zinc-200 bg-white p-3">
+                              <div className="text-xs font-semibold text-zinc-500">
+                                Nombre en proveedor
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <Input
+                                  value={nameForSupplierDraft[p.id] ?? ""}
+                                  onChange={(e) =>
+                                    setNameForSupplierValue(
+                                      p.id,
+                                      e.target.value
+                                    )
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (
+                                      e.key === "Enter" &&
+                                      dirtyName &&
+                                      !savingName
+                                    )
+                                      saveNameForSupplier(p);
+                                    if (e.key === "Escape") resetRowDrafts(p);
+                                  }}
+                                  className={cn(
+                                    dirtyName
+                                      ? "border-amber-300"
+                                      : "border-zinc-200"
+                                  )}
+                                  placeholder="Factura/lista…"
+                                />
+                                <Button
+                                  {...(!dirtyName
+                                    ? { variant: "secondary" as const }
+                                    : {})}
+                                  loading={savingName}
+                                  disabled={!dirtyName}
+                                  onClick={() => saveNameForSupplier(p)}
+                                  title={dirtyName ? "Guardar" : "Sin cambios"}
+                                >
+                                  <Save className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="mt-2 text-[11px] text-zinc-500">
+                                Tip: Enter guarda · Esc descarta
+                              </div>
+                            </div>
+
+                            {/* Costo */}
+                            <div className="rounded-2xl border border-zinc-200 bg-white p-3">
+                              <div className="text-xs font-semibold text-zinc-500">
+                                Costo unitario
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <div className="relative w-full">
+                                  <BadgeDollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                  <Input
+                                    className={cn(
+                                      "pl-9 tabular-nums",
+                                      dirtyCost
+                                        ? "border-amber-300"
+                                        : "border-zinc-200"
+                                    )}
+                                    value={lastCostDraft[p.id] ?? "0"}
+                                    onChange={(e) =>
+                                      setCostValue(p.id, e.target.value)
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (
+                                        e.key === "Enter" &&
+                                        dirtyCost &&
+                                        !savingCost
+                                      )
+                                        saveCost(p);
+                                      if (e.key === "Escape") resetRowDrafts(p);
+                                    }}
+                                  />
+                                </div>
+
+                                <Button
+                                  {...(!dirtyCost
+                                    ? { variant: "secondary" as const }
+                                    : {})}
+                                  loading={savingCost}
+                                  disabled={!dirtyCost}
+                                  onClick={() => saveCost(p)}
+                                  title={dirtyCost ? "Guardar" : "Sin cambios"}
+                                >
+                                  <Save className="h-4 w-4" />
+                                </Button>
+
+                                <span className="text-xs font-semibold text-zinc-600">
+                                  {p.cost?.currency ?? "ARS"}
+                                </span>
+                              </div>
+                              <div className="mt-2 text-[11px] text-zinc-500">
+                                Tip: Enter guarda · Esc descarta
+                              </div>
+                            </div>
+
+                            {/* Mínimo */}
+                            <div className="rounded-2xl border border-zinc-200 bg-white p-3">
+                              <div className="text-xs font-semibold text-zinc-500">
+                                Stock mínimo
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <Input
+                                  className={cn(
+                                    "tabular-nums",
+                                    dirtyMin
+                                      ? "border-amber-300"
+                                      : "border-zinc-200"
+                                  )}
+                                  value={minDraft[p.id] ?? "0"}
+                                  onChange={(e) =>
+                                    setMinValue(p.id, e.target.value)
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (
+                                      e.key === "Enter" &&
+                                      dirtyMin &&
+                                      !savingMin
+                                    )
+                                      saveMin(p);
+                                    if (e.key === "Escape") resetRowDrafts(p);
+                                  }}
+                                />
+                                <Button
+                                  {...(!dirtyMin
+                                    ? { variant: "secondary" as const }
+                                    : {})}
+                                  loading={savingMin}
+                                  disabled={!dirtyMin}
+                                  onClick={() => saveMin(p)}
+                                  title={dirtyMin ? "Guardar" : "Sin cambios"}
+                                >
+                                  <Save className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="mt-2 text-[11px] text-zinc-500">
+                                Tip: Enter guarda · Esc descarta
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Footer row actions */}
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="inline-flex items-center gap-2">
+                              <StatusPill active={p.isActive} />
+                              {dirtyAny && (
+                                <span className="text-xs font-semibold text-amber-800">
+                                  Tenés cambios sin guardar
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="secondary"
+                                onClick={() => resetRowDrafts(p)}
+                                disabled={!dirtyAny || busy}
+                              >
+                                <X className="h-4 w-4" />
+                                Descartar
+                              </Button>
+
+                              <Button
+                                onClick={() => saveRow(p)}
+                                disabled={!dirtyAny || busy}
+                              >
+                                <Save className="h-4 w-4" />
+                                Guardar cambios
+                              </Button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
 
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-zinc-500">
+                  <td
+                    colSpan={4}
+                    className="px-4 py-10 text-center text-sm text-zinc-500"
+                  >
                     No hay ingredientes para mostrar.
                   </td>
                 </tr>
@@ -863,7 +1233,10 @@ export default function AdminIngredientsPage() {
 
               {loading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-zinc-500">
+                  <td
+                    colSpan={4}
+                    className="px-4 py-10 text-center text-sm text-zinc-500"
+                  >
                     Cargando…
                   </td>
                 </tr>
@@ -873,7 +1246,8 @@ export default function AdminIngredientsPage() {
         </div>
 
         <div className="text-xs text-zinc-500">
-          Mostrando <b>{filtered.length}</b> de <b>{items.length}</b> ingredientes.
+          Mostrando <b>{filtered.length}</b> de <b>{items.length}</b>{" "}
+          ingredientes.
         </div>
       </div>
     </AdminProtected>

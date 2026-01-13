@@ -22,12 +22,8 @@ import {
   Power,
   Filter,
   Building2,
+  X,
 } from "lucide-react";
-
-/* =============================================================================
- * Branch (por ahora fijo como pediste)
- * ========================================================================== */
-const DEFAULT_BRANCH_ID = "695fb04eb41db4493f3ae912";
 
 /* =============================================================================
  * Types
@@ -187,6 +183,83 @@ function Notice({
   );
 }
 
+/** Drawer simple (sin dependencias) */
+function Drawer({
+  open,
+  title,
+  subtitle,
+  onClose,
+  footer,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "fixed inset-0 z-50",
+        open ? "pointer-events-auto" : "pointer-events-none"
+      )}
+      aria-hidden={!open}
+    >
+      <div
+        className={cn(
+          "absolute inset-0 bg-black/40 transition-opacity",
+          open ? "opacity-100" : "opacity-0"
+        )}
+        onClick={onClose}
+      />
+
+      <div
+        className={cn(
+          "absolute right-0 top-0 h-full w-full sm:w-180 bg-white shadow-2xl transition-transform",
+          open ? "translate-x-0" : "translate-x-full"
+        )}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="flex h-full flex-col">
+          <div className="border-b border-zinc-200 px-5 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-lg font-semibold text-zinc-900">
+                  {title}
+                </div>
+                {subtitle ? (
+                  <div className="mt-0.5 text-sm text-zinc-500">{subtitle}</div>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-2xl border border-zinc-200 bg-white p-2 text-zinc-700 hover:bg-zinc-50"
+                aria-label="Cerrar"
+                title="Cerrar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto p-5">{children}</div>
+
+          {footer ? (
+            <div className="border-t border-zinc-200 bg-white p-4">
+              {footer}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* =============================================================================
  * Page
  * ========================================================================== */
@@ -199,9 +272,6 @@ export default function AdminPreparationsPage() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [preps, setPreps] = useState<Preparation[]>([]);
 
-  // Branch (fijo por ahora)
-  const [branchId] = useState<string>(DEFAULT_BRANCH_ID);
-
   // Page state
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -212,6 +282,9 @@ export default function AdminPreparationsPage() {
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(true);
   const [listSupplierId, setListSupplierId] = useState<string>(""); // "" => todos
+
+  // Drawer state
+  const [editorOpen, setEditorOpen] = useState(false);
 
   // Editor (create / edit)
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -232,9 +305,9 @@ export default function AdminPreparationsPage() {
   const [itemNote, setItemNote] = useState("");
 
   // Inline actions
-  const [recomputingById, setRecomputingById] = useState<Record<string, boolean>>(
-    {}
-  );
+  const [recomputingById, setRecomputingById] = useState<
+    Record<string, boolean>
+  >({});
   const [togglingById, setTogglingById] = useState<Record<string, boolean>>({});
 
   const activeSuppliers = useMemo(
@@ -290,9 +363,10 @@ export default function AdminPreparationsPage() {
         supplierId: p.supplierId ?? null,
         extra:
           p.computed?.unitCost != null
-            ? `${fmtMoney(n0(p.computed.unitCost), p.computed.currency || p.currency)}/${unitLabel(
-                p.yieldUnit
-              )}`
+            ? `${fmtMoney(
+                n0(p.computed.unitCost),
+                p.computed.currency || p.currency
+              )}/${unitLabel(p.yieldUnit)}`
             : undefined,
       }));
 
@@ -379,7 +453,7 @@ export default function AdminPreparationsPage() {
   async function loadIngredientsAll() {
     const data = await apiFetchAuthed<Ingredient[]>(
       getAccessToken,
-      `/ingredients?branchId=${encodeURIComponent(branchId)}`
+      `/ingredients`
     );
     setIngredients(data);
   }
@@ -387,7 +461,7 @@ export default function AdminPreparationsPage() {
   async function loadPreparations() {
     const data = await apiFetchAuthed<Preparation[]>(
       getAccessToken,
-      `/preparations?branchId=${encodeURIComponent(branchId)}`
+      `/preparations`
     );
     setPreps(data);
   }
@@ -397,7 +471,11 @@ export default function AdminPreparationsPage() {
     setOk(null);
     setLoading(true);
     try {
-      await Promise.all([loadSuppliers(), loadIngredientsAll(), loadPreparations()]);
+      await Promise.all([
+        loadSuppliers(),
+        loadIngredientsAll(),
+        loadPreparations(),
+      ]);
       setOk("Datos actualizados ✔");
       setTimeout(() => setOk(null), 1400);
     } catch (e: any) {
@@ -416,7 +494,7 @@ export default function AdminPreparationsPage() {
    * Editor helpers
    * ========================================================================== */
 
-  function resetEditor() {
+  function resetEditorStateOnly() {
     setEditingId(null);
     setName("");
     setDescription("");
@@ -433,7 +511,20 @@ export default function AdminPreparationsPage() {
     setItemNote("");
   }
 
+  function openCreateDrawer() {
+    setErr(null);
+    setOk(null);
+    resetEditorStateOnly();
+    setEditorOpen(true);
+  }
+
+  function closeEditorDrawer() {
+    setEditorOpen(false);
+  }
+
   function startEdit(p: Preparation) {
+    setErr(null);
+    setOk(null);
     setEditingId(p.id);
     setName(p.name);
     setDescription(p.description ?? "");
@@ -451,6 +542,7 @@ export default function AdminPreparationsPage() {
         note: it.note ?? null,
       }))
     );
+    setEditorOpen(true);
   }
 
   function addItemFromPick() {
@@ -548,7 +640,7 @@ export default function AdminPreparationsPage() {
       const bodyBase = {
         name: nName,
         description: description.trim() ? description.trim() : null,
-        supplierId: null as any, // si querés, lo hacemos seleccionable
+        supplierId: null as any, // si querés lo hacemos seleccionable
         yieldQty,
         yieldUnit,
         wastePct,
@@ -564,7 +656,6 @@ export default function AdminPreparationsPage() {
       };
 
       if (editingId) {
-        // PATCH NO envía branchId (lo bloqueamos en backend)
         await apiFetchAuthed(getAccessToken, `/preparations/${editingId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -572,18 +663,18 @@ export default function AdminPreparationsPage() {
         });
         setOk("Preparación actualizada ✔");
       } else {
-        // POST requiere branchId
         await apiFetchAuthed(getAccessToken, "/preparations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ branchId, ...bodyBase }),
+          body: JSON.stringify(bodyBase),
         });
         setOk("Preparación creada ✔");
-        resetEditor();
+        resetEditorStateOnly();
       }
 
       setTimeout(() => setOk(null), 1400);
       await loadPreparations();
+      setEditorOpen(false);
     } catch (e: any) {
       setErr(e?.message || "Error guardando preparación");
     } finally {
@@ -650,15 +741,11 @@ export default function AdminPreparationsPage() {
                 Preparaciones
               </h1>
               <p className="mt-1 text-sm text-zinc-500">
-                Recetas / preps: combinan ingredientes y otras preparaciones, con
-                costo total y unitario.
+                Recetas / preps: combinan ingredientes y otras preparaciones,
+                con costo total y unitario.
               </p>
 
               <div className="mt-3 flex flex-wrap gap-4 text-sm">
-                <span className="inline-flex items-center gap-2">
-                  <Building2 className="h-4 w-4" />
-                  Branch: <b className="font-mono">{branchId.slice(-6)}</b>
-                </span>
                 <span>
                   Total: <b>{preps.length}</b>
                 </span>
@@ -674,12 +761,17 @@ export default function AdminPreparationsPage() {
 
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" onClick={loadAll} loading={loading}>
-                <RefreshCcw className="h-4 w-4" />
-                Actualizar
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                  Actualizar
+                </span>
               </Button>
-              <Button variant="secondary" onClick={resetEditor} disabled={busy}>
-                <XCircle className="h-4 w-4" />
-                Nuevo
+
+              <Button onClick={openCreateDrawer} disabled={busy}>
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Nueva preparación{" "}
+                </span>
               </Button>
             </div>
           </div>
@@ -740,14 +832,214 @@ export default function AdminPreparationsPage() {
           </div>
         </div>
 
-        {/* Main */}
-        <div className="grid gap-6 lg:grid-cols-[520px_1fr]">
-          {/* Editor */}
+        {/* List (full width now) */}
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <table className="min-w-full">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Preparación
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Rinde
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Costo total
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Unitario
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Estado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-zinc-100">
+                {loading && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-10 text-sm text-zinc-500"
+                    >
+                      Cargando…
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  listFiltered.map((p) => {
+                    const rec = recomputingById[p.id];
+                    const tog = togglingById[p.id];
+                    return (
+                      <tr key={p.id} className="hover:bg-zinc-50">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-zinc-900">
+                            {p.name}
+                          </div>
+                          {p.description ? (
+                            <div className="mt-0.5 text-xs text-zinc-500 line-clamp-2">
+                              {p.description}
+                            </div>
+                          ) : null}
+                          <div className="mt-1 text-xs text-zinc-500">
+                            Items: <b>{p.items?.length ?? 0}</b>
+                            {p.supplierId ? (
+                              <span className="ml-2">
+                                · Prov:{" "}
+                                <b>
+                                  {suppliers.find((s) => s.id === p.supplierId)
+                                    ?.name || "—"}
+                                </b>
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-zinc-700">
+                          {n0(p.yieldQty)} {unitLabel(p.yieldUnit)}
+                        </td>
+
+                        <td className="px-4 py-3 text-sm">
+                          <b>
+                            {fmtMoney(
+                              n0(p.computed?.totalCost),
+                              p.computed?.currency || p.currency
+                            )}
+                          </b>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-zinc-700">
+                          {fmtMoney(
+                            n0(p.computed?.unitCost),
+                            p.computed?.currency || p.currency
+                          )}
+                          /{unitLabel(p.yieldUnit)}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <StatusPill active={p.isActive !== false} />
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="secondary"
+                              onClick={() => startEdit(p)}
+                              disabled={busy}
+                            >
+                              Editar
+                            </Button>
+
+                            <Button
+                              variant="secondary"
+                              onClick={() => recomputePrep(p.id)}
+                              loading={rec}
+                              disabled={rec || busy}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Calculator className="h-4 w-4" />
+                                Recalcular
+                              </span>
+                            </Button>
+
+                            <Button
+                              variant={
+                                p.isActive !== false ? "danger" : "secondary"
+                              }
+                              onClick={() => toggleActive(p)}
+                              loading={tog}
+                              disabled={tog || busy}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Power className="h-4 w-4" />
+                                {p.isActive !== false
+                                  ? "Desactivar"
+                                  : "Reactivar"}{" "}
+                              </span>
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                {!loading && listFiltered.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-10 text-sm text-zinc-500"
+                    >
+                      No hay preparaciones para mostrar con estos filtros.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="text-xs text-zinc-500">
+            Lista: proveedor <b>{listSupplierName}</b> ·{" "}
+            {onlyActive ? "solo activas" : "todas"}.
+          </div>
+        </div>
+
+        {/* Drawer Editor */}
+        <Drawer
+          open={editorOpen}
+          title={editingId ? "Editar preparación" : "Nueva preparación"}
+          subtitle="Combiná ingredientes y/o preparaciones. El costo se estima en vivo."
+          onClose={() => {
+            if (busy) return;
+            closeEditorDrawer();
+          }}
+          footer={
+            <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (busy) return;
+                  closeEditorDrawer();
+                }}
+                disabled={busy}
+              >
+                Cancelar
+              </Button>
+
+              {editingId ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (busy) return;
+                    resetEditorStateOnly();
+                  }}
+                  disabled={busy}
+                >
+                  <XCircle className="h-4 w-4" />
+                  Nuevo
+                </Button>
+              ) : null}
+
+              <Button
+                onClick={savePreparation}
+                loading={busy}
+                disabled={busy || !name.trim()}
+              >
+                <Save className="h-4 w-4" />
+                {editingId ? "Guardar cambios" : "Crear"}
+              </Button>
+            </div>
+          }
+        >
           <Card>
             <div className="flex items-start justify-between px-5 pt-5">
               <div>
-                <div className="text-base font-semibold">
-                  {editingId ? "Editar preparación" : "Crear preparación"}
+                <div className="text-base font-semibold text-zinc-900">
+                  {editingId ? "Editor" : "Crear"}
                 </div>
                 <div className="text-sm text-zinc-500">
                   Items pueden ser ingredientes o preparaciones.
@@ -841,30 +1133,35 @@ export default function AdminPreparationsPage() {
                   <div className="grid gap-2 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Costo ingredientes</span>
-                      <b>{fmtMoney(editorTotals.ingredientsCost, currency)}</b>
+                      <b className="text-zinc-900">
+                        {fmtMoney(editorTotals.ingredientsCost, currency)}
+                      </b>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Costo total</span>
-                      <b>{fmtMoney(editorTotals.totalCost, currency)}</b>
+                      <b className="text-zinc-900">
+                        {fmtMoney(editorTotals.totalCost, currency)}
+                      </b>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">
                         Costo unitario ({unitLabel(yieldUnit)})
                       </span>
-                      <b>{fmtMoney(editorTotals.unitCost, currency)}</b>
+                      <b className="text-zinc-900">
+                        {fmtMoney(editorTotals.unitCost, currency)}
+                      </b>
                     </div>
                   </div>
                 </div>
 
                 {/* Items */}
                 <div className="rounded-2xl border border-zinc-200 p-4">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
                       <Layers className="h-4 w-4" />
                       Items
                     </div>
 
-                    {/* supplier filter for item picker */}
                     <div className="flex items-center gap-2">
                       <span className="hidden sm:inline text-xs text-zinc-500">
                         Proveedor:
@@ -1015,26 +1312,32 @@ export default function AdminPreparationsPage() {
                                   {it.type}
                                 </span>
                               </td>
-                              <td className="px-3 py-2 text-sm font-medium">
+
+                              <td className="px-3 py-2 text-sm font-medium text-zinc-900">
                                 {getItemLabel(it)}
                               </td>
+
                               <td className="px-3 py-2">
                                 <input
-                                  className="w-24 rounded-xl border px-3 py-2 text-sm"
+                                  className="w-24 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
                                   value={String(it.qty ?? 0)}
                                   onChange={(e) => {
                                     if (!isValidNumberDraft(e.target.value))
                                       return;
-                                    updateItem(idx, { qty: n0(e.target.value) });
+                                    updateItem(idx, {
+                                      qty: n0(e.target.value),
+                                    });
                                   }}
                                 />
                               </td>
+
                               <td className="px-3 py-2 text-sm text-zinc-600">
                                 {unitLabel(u)}
                               </td>
+
                               <td className="px-3 py-2">
                                 <input
-                                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                                  className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
                                   value={it.note ?? ""}
                                   onChange={(e) =>
                                     updateItem(idx, { note: e.target.value })
@@ -1042,6 +1345,7 @@ export default function AdminPreparationsPage() {
                                   placeholder="—"
                                 />
                               </td>
+
                               <td className="px-3 py-2 text-right">
                                 <Button
                                   variant="ghost"
@@ -1058,184 +1362,16 @@ export default function AdminPreparationsPage() {
                       </tbody>
                     </table>
                   </div>
-                </div>
 
-                {/* Save */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs text-zinc-500">
-                    Tip: el filtro de proveedor es solo para buscar rápido items.
-                    La preparación puede mezclar proveedores.
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={resetEditor}
-                      disabled={busy}
-                    >
-                      <XCircle className="h-4 w-4" />
-                      Cancelar
-                    </Button>
-                    <Button
-                      onClick={savePreparation}
-                      loading={busy}
-                      disabled={busy || !name.trim()}
-                    >
-                      <Save className="h-4 w-4" />
-                      {editingId ? "Guardar cambios" : "Crear"}
-                    </Button>
+                  <div className="mt-3 text-xs text-zinc-500">
+                    Tip: el filtro de proveedor es solo para buscar rápido
+                    items. La preparación puede mezclar proveedores.
                   </div>
                 </div>
               </div>
             </CardBody>
           </Card>
-
-          {/* List */}
-          <div className="space-y-4">
-            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Preparación
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Rinde
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Costo total
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Unitario
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Estado
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
-                      Acciones
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-zinc-100">
-                  {loading && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-10 text-sm text-zinc-500">
-                        Cargando…
-                      </td>
-                    </tr>
-                  )}
-
-                  {!loading &&
-                    listFiltered.map((p) => {
-                      const rec = recomputingById[p.id];
-                      const tog = togglingById[p.id];
-                      return (
-                        <tr key={p.id} className="hover:bg-zinc-50">
-                          <td className="px-4 py-3">
-                            <div className="font-semibold text-zinc-900">
-                              {p.name}
-                            </div>
-                            {p.description ? (
-                              <div className="mt-0.5 text-xs text-zinc-500 line-clamp-2">
-                                {p.description}
-                              </div>
-                            ) : null}
-                            <div className="mt-1 text-xs text-zinc-500">
-                              Items: <b>{p.items?.length ?? 0}</b>
-                              {p.supplierId ? (
-                                <span className="ml-2">
-                                  · Prov:{" "}
-                                  <b>
-                                    {suppliers.find((s) => s.id === p.supplierId)
-                                      ?.name || "—"}
-                                  </b>
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-3 text-sm text-zinc-700">
-                            {n0(p.yieldQty)} {unitLabel(p.yieldUnit)}
-                          </td>
-
-                          <td className="px-4 py-3 text-sm">
-                            <b>
-                              {fmtMoney(
-                                n0(p.computed?.totalCost),
-                                p.computed?.currency || p.currency
-                              )}
-                            </b>
-                          </td>
-
-                          <td className="px-4 py-3 text-sm text-zinc-700">
-                            {fmtMoney(
-                              n0(p.computed?.unitCost),
-                              p.computed?.currency || p.currency
-                            )}
-                            /{unitLabel(p.yieldUnit)}
-                          </td>
-
-                          <td className="px-4 py-3">
-                            <StatusPill active={p.isActive !== false} />
-                          </td>
-
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                variant="secondary"
-                                onClick={() => startEdit(p)}
-                                disabled={busy}
-                              >
-                                Editar
-                              </Button>
-
-                              <Button
-                                variant="secondary"
-                                onClick={() => recomputePrep(p.id)}
-                                loading={rec}
-                                disabled={rec || busy}
-                              >
-                                <Calculator className="h-4 w-4" />
-                                Recalcular
-                              </Button>
-
-                              <Button
-                                variant={
-                                  p.isActive !== false ? "danger" : "secondary"
-                                }
-                                onClick={() => toggleActive(p)}
-                                loading={tog}
-                                disabled={tog || busy}
-                              >
-                                <Power className="h-4 w-4" />
-                                {p.isActive !== false
-                                  ? "Desactivar"
-                                  : "Reactivar"}
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                  {!loading && listFiltered.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-10 text-sm text-zinc-500">
-                        No hay preparaciones para mostrar con estos filtros.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="text-xs text-zinc-500">
-              Lista: proveedor <b>{listSupplierName}</b> ·{" "}
-              {onlyActive ? "solo activas" : "todas"}.
-            </div>
-          </div>
-        </div>
+        </Drawer>
       </div>
     </AdminProtected>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Field, Input } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
 import { RefreshCcw, Wallet, Lock } from "lucide-react";
@@ -30,6 +30,7 @@ function Notice({
   tone: "error" | "ok" | "warn";
   children: React.ReactNode;
 }) {
+  const isOk = tone === "ok";
   return (
     <div
       className={cn(
@@ -42,7 +43,7 @@ function Notice({
       )}
     >
       <span className="inline-flex items-center gap-2">
-        {tone === "ok" ? (
+        {isOk ? (
           <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white text-[10px]">
             ✓
           </span>
@@ -86,10 +87,31 @@ export default function CashHeader({
   hideDatePicker?: boolean;
   dateLabel?: string;
 }) {
+  const net = summary?.totals?.net ?? null;
+  const income = summary?.totals?.income ?? null;
+  const expense = summary?.totals?.expense ?? null;
+
+  const canOpenOpening = useMemo(() => {
+    // Solo tiene sentido apertura si el día existe y está OPEN (ya lo tenías)
+    return !!day && day.status === "OPEN" && !busy && !loading;
+  }, [day, busy, loading]);
+
+  const canClose = useMemo(() => {
+    return !!day && day.status === "OPEN" && !busy && !loading;
+  }, [day, busy, loading]);
+
+  const statusHint = useMemo(() => {
+    if (!day) return "No existe caja para esa fecha.";
+    if (day.status === "CLOSED")
+      return "La caja está cerrada (no se puede operar).";
+    return null;
+  }, [day]);
+
   return (
     <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        {/* Left */}
+        <div className="min-w-65 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
             Caja diaria
           </h1>
@@ -99,23 +121,38 @@ export default function CashHeader({
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {day ? <StatusPill status={day.status} /> : null}
+
             {summary ? (
               <span className="text-sm text-zinc-600">
-                Neto: <b>{moneyARS(summary.totals.net)}</b>{" "}
-                <span className="text-zinc-400">·</span> Ingresos:{" "}
-                <b className="text-emerald-700">
-                  {moneyARS(summary.totals.income)}
+                Neto:{" "}
+                <b className={cn(net != null && net < 0 && "text-rose-700")}>
+                  {net == null ? "—" : moneyARS(net)}
                 </b>{" "}
-                <span className="text-zinc-400">·</span> Egresos:{" "}
+                <span className="text-zinc-300">·</span> Ingresos:{" "}
+                <b className="text-emerald-700">
+                  {income == null ? "—" : moneyARS(income)}
+                </b>{" "}
+                <span className="text-zinc-300">·</span> Egresos:{" "}
                 <b className="text-rose-700">
-                  {moneyARS(summary.totals.expense)}
+                  {expense == null ? "—" : moneyARS(expense)}
                 </b>
               </span>
-            ) : null}
+            ) : (
+              <span className="text-sm text-zinc-500">
+                {loading ? "Cargando resumen…" : "Sin resumen para mostrar."}
+              </span>
+            )}
           </div>
+
+          {statusHint ? (
+            <div className="mt-3">
+              <Notice tone="warn">{statusHint}</Notice>
+            </div>
+          ) : null}
         </div>
 
-        <div className="min-w-[260px]">
+        {/* Right */}
+        <div className="w-full min-w-65 sm:w-auto">
           {!hideDatePicker ? (
             <Field label="Fecha">
               <Input
@@ -140,28 +177,50 @@ export default function CashHeader({
             <Button
               variant="secondary"
               onClick={onRefresh}
+              disabled={busy}
               loading={busy || loading}
+              title="Refrescar datos del día y resumen"
             >
-              <RefreshCcw className="h-4 w-4" />
-              Actualizar
+              <span className="inline-flex items-center gap-2">
+                <RefreshCcw className="h-4 w-4" />
+                Actualizar{" "}
+              </span>
             </Button>
 
             <Button
               variant="secondary"
               onClick={onOpenOpeningModal}
-              disabled={!day || day.status !== "OPEN" || busy}
+              disabled={!canOpenOpening}
+              title={
+                !day
+                  ? "Primero creá/seleccioná un día de caja"
+                  : day.status !== "OPEN"
+                  ? "La caja debe estar ABIERTA"
+                  : undefined
+              }
             >
-              <Wallet className="h-4 w-4" />
-              Apertura
+              <span className="inline-flex items-center gap-2">
+                <Wallet className="h-4 w-4" />
+                Apertura
+              </span>
             </Button>
 
             <Button
               variant={day?.status === "OPEN" ? "danger" : "secondary"}
               onClick={onOpenClose}
-              disabled={!day || day.status !== "OPEN" || busy}
+              disabled={!canClose}
+              title={
+                !day
+                  ? "Primero creá/seleccioná un día de caja"
+                  : day.status !== "OPEN"
+                  ? "La caja ya está cerrada"
+                  : "Cerrar la caja del día"
+              }
             >
-              <Lock className="h-4 w-4" />
-              Cerrar caja
+              <span className="inline-flex items-center gap-2">
+                <Lock className="h-4 w-4" />
+                Cerrar caja{" "}
+              </span>
             </Button>
           </div>
         </div>

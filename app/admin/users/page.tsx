@@ -13,6 +13,9 @@ import {
   KeyRound,
   Power,
   X,
+  Mail,
+  User as UserIcon,
+  ShieldCheck,
 } from "lucide-react";
 
 /* ============================================================================
@@ -78,6 +81,37 @@ function StatusPill({ active }: { active: boolean }) {
   );
 }
 
+function StatChip({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "success" | "warn" | "info";
+}) {
+  const cls =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : tone === "warn"
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : tone === "info"
+      ? "border-sky-200 bg-sky-50 text-sky-900"
+      : "border-zinc-200 bg-zinc-50 text-zinc-800";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold",
+        cls
+      )}
+    >
+      <span className="text-zinc-500">{label}</span>
+      <span>{value}</span>
+    </span>
+  );
+}
+
 /* ============================================================================
  * Page (ruta Next: /admin/users)
  * ========================================================================== */
@@ -96,7 +130,7 @@ export default function AdminUsersPage() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
   // create
-  const [createOpen, setCreateOpen] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newUsername, setNewUsername] = useState("");
@@ -129,7 +163,7 @@ export default function AdminUsersPage() {
   }, [users]);
 
   /* ============================================================================
-   * API (Backend nuevo: /users)
+   * API
    * ========================================================================== */
 
   async function load() {
@@ -137,7 +171,6 @@ export default function AdminUsersPage() {
     setOkMsg(null);
     setLoadingList(true);
     try {
-      // ✅ ADMIN: esto devuelve SOLO users de su branch (scoping en backend)
       const data = await apiFetchAuthed<UserRow[]>(getAccessToken, "/users");
       setUsers(Array.isArray(data) ? data : []);
     } catch (e: any) {
@@ -165,9 +198,8 @@ export default function AdminUsersPage() {
         body: JSON.stringify({
           email: newEmail.trim().toLowerCase(),
           password: newPass,
-          roles: [newRole], // ✅ USER/MANAGER/CASHIER
+          roles: [newRole],
           username: newUsername.trim() || null,
-          // branchId NO se manda: backend lo fuerza por actor.branchId
         }),
       });
 
@@ -175,6 +207,7 @@ export default function AdminUsersPage() {
       setNewPass("");
       setNewUsername("");
       setNewRole("USER");
+      setCreateOpen(false);
 
       setOkMsg("Usuario creado ✔");
       await load();
@@ -238,7 +271,7 @@ export default function AdminUsersPage() {
     try {
       await apiFetchAuthed(getAccessToken, `/users/${resetUser.id}/password`, {
         method: "PATCH",
-        body: JSON.stringify({ newPassword: resetPass }), // ✅ backend nuevo usa newPassword
+        body: JSON.stringify({ newPassword: resetPass }),
       });
 
       setResetOpen(false);
@@ -255,36 +288,70 @@ export default function AdminUsersPage() {
   }
 
   /* ============================================================================
+   * UX helpers
+   * ========================================================================== */
+
+  const canCreate = !!newEmail.trim() && !!newPass && !busyAction;
+  const hasFilters = !!q.trim() || onlyActive;
+
+  /* ============================================================================
    * Render
    * ========================================================================== */
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Usuarios (Branch)
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Gestión de accesos, roles y estado de usuarios de tu sucursal.
-        </p>
+      <div className="rounded-3xl border border-zinc-200 bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="h-10 w-10 rounded-2xl border bg-white flex items-center justify-center shrink-0">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-zinc-900">
+                  Usuarios 
+                </h1>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Gestión de accesos, roles y estado de usuarios de tu sucursal.
+                </p>
+              </div>
+            </div>
 
-        <div className="mt-4 flex flex-wrap gap-4 text-sm">
-          <span>
-            Total: <b>{totals.total}</b>
-          </span>
-          <span className="text-emerald-700">
-            Activos: <b>{totals.active}</b>
-          </span>
-          <span className="text-blue-700">
-            Managers: <b>{totals.managers}</b>
-          </span>
-          <span className="text-amber-700">
-            Cashiers: <b>{totals.cashiers}</b>
-          </span>
-          <span className="text-zinc-900">
-            Admins: <b>{totals.admins}</b>
-          </span>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <StatChip label="Total" value={totals.total} tone="neutral" />
+              <StatChip label="Activos" value={totals.active} tone="success" />
+              <StatChip label="Managers" value={totals.managers} tone="info" />
+              <StatChip label="Cashiers" value={totals.cashiers} tone="warn" />
+              <StatChip label="Admins" value={totals.admins} tone="neutral" />
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+            <Button
+              variant="secondary"
+              onClick={load}
+              loading={loadingList}
+              disabled={busyAction}
+              className="w-full sm:w-auto"
+            >
+              <div className="inline-flex items-center gap-2">
+                <RefreshCcw className="h-4 w-4" />
+                <span className="sm:hidden">Recargar</span>
+              </div>
+            </Button>
+
+            <Button
+              onClick={() => setCreateOpen(true)}
+              disabled={busyAction}
+              className="w-full sm:w-auto"
+            >
+              <div className="inline-flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Nuevo usuario
+              </div>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -308,6 +375,7 @@ export default function AdminUsersPage() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
             <Input
+              ref={searchRef as any}
               placeholder="Buscar por email…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -318,7 +386,7 @@ export default function AdminUsersPage() {
           <button
             onClick={() => setOnlyActive((v) => !v)}
             className={cn(
-              "h-10 rounded-xl border px-3 text-sm font-semibold",
+              "h-10 rounded-xl border px-3 text-sm font-semibold w-full sm:w-auto",
               onlyActive
                 ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                 : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
@@ -329,82 +397,21 @@ export default function AdminUsersPage() {
 
           <Button
             variant="secondary"
-            onClick={load}
-            loading={loadingList}
-            disabled={busyAction}
+            onClick={() => {
+              setQ("");
+              setOnlyActive(false);
+              searchRef.current?.focus?.();
+            }}
+            disabled={busyAction || !hasFilters}
+            className="w-full sm:w-auto"
           >
-            <RefreshCcw className="h-4 w-4" />
+            Limpiar
           </Button>
         </div>
       </div>
 
-      {/* Create */}
-      <Card>
-        <div className="flex items-start justify-between gap-4 px-5 pt-5">
-          <div>
-            <div className="text-base font-semibold text-zinc-900">
-              Crear usuario
-            </div>
-            <div className="mt-1 text-sm text-zinc-500">
-              Como ADMIN, podés crear USER / MANAGER / CASHIER para tu sucursal.
-            </div>
-          </div>
-
-          <button
-            onClick={() => setCreateOpen((v) => !v)}
-            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-          >
-            {createOpen ? "Ocultar" : "Mostrar"}
-          </button>
-        </div>
-
-        {createOpen && (
-          <CardBody>
-            <div className="grid gap-3 md:grid-cols-4">
-              <Field label="Email">
-                <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
-              </Field>
-
-              <Field label="Password">
-                <Input
-                  type="password"
-                  value={newPass}
-                  onChange={(e) => setNewPass(e.target.value)}
-                />
-              </Field>
-
-              <Field label="Username (opcional)">
-                <Input
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                />
-              </Field>
-
-              <Field label="Rol">
-                <Select value={newRole} onChange={(e) => setNewRole(e.target.value as Role)}>
-                  <option value="USER">USER</option>
-                  <option value="MANAGER">MANAGER</option>
-                  <option value="CASHIER">CASHIER</option>
-                </Select>
-              </Field>
-
-              <div className="md:col-span-4 flex items-end">
-                <Button
-                  className="w-full"
-                  onClick={createUser}
-                  disabled={busyAction || !newEmail.trim() || !newPass}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Crear
-                </Button>
-              </div>
-            </div>
-          </CardBody>
-        )}
-      </Card>
-
-      {/* List */}
-      <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+      {/* List (desktop table) */}
+      <div className="hidden md:block overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <table className="min-w-full">
           <thead className="bg-zinc-50">
             <tr>
@@ -445,14 +452,25 @@ export default function AdminUsersPage() {
 
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
-                    {/* ✅ ADMIN NO puede asignar ADMIN: botones solo USER/MANAGER/CASHIER */}
-                    <Button variant="secondary" onClick={() => setRoles(u.id, ["USER"])} disabled={busyAction}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setRoles(u.id, ["USER"])}
+                      disabled={busyAction}
+                    >
                       USER
                     </Button>
-                    <Button variant="secondary" onClick={() => setRoles(u.id, ["MANAGER"])} disabled={busyAction}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setRoles(u.id, ["MANAGER"])}
+                      disabled={busyAction}
+                    >
                       MANAGER
                     </Button>
-                    <Button variant="secondary" onClick={() => setRoles(u.id, ["CASHIER"])} disabled={busyAction}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setRoles(u.id, ["CASHIER"])}
+                      disabled={busyAction}
+                    >
                       CASHIER
                     </Button>
 
@@ -492,6 +510,181 @@ export default function AdminUsersPage() {
         </table>
       </div>
 
+      {/* List (mobile cards) */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((u) => (
+          <div
+            key={u.id}
+            className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-xl border border-zinc-200 bg-zinc-50 p-2 shrink-0">
+                <Mail className="h-4 w-4 text-zinc-700" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-zinc-900 truncate">
+                  {u.email}
+                </div>
+
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <StatusPill active={u.isActive} />
+                  {u.username ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
+                      <UserIcon className="h-3.5 w-3.5" />
+                      <span className="truncate max-w-55">
+                        {u.username}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {u.roles.map((r) => (
+                    <RolePill key={r} role={r} />
+                  ))}
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setRoles(u.id, ["USER"])}
+                    disabled={busyAction}
+                    className="w-full"
+                  >
+                    USER
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setRoles(u.id, ["MANAGER"])}
+                    disabled={busyAction}
+                    className="w-full"
+                  >
+                    MANAGER
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setRoles(u.id, ["CASHIER"])}
+                    disabled={busyAction}
+                    className="w-full"
+                  >
+                    CASHIER
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setResetUser(u);
+                      setResetOpen(true);
+                    }}
+                    disabled={busyAction}
+                    className="w-full"
+                    title="Reset password"
+                  >
+                    <div className="inline-flex items-center gap-2">
+                      <KeyRound className="h-4 w-4" />
+                      Reset
+                    </div>
+                  </Button>
+
+                  <div className="col-span-2">
+                    <Button
+                      variant={u.isActive ? "danger" : "secondary"}
+                      onClick={() => toggleActive(u)}
+                      disabled={busyAction}
+                      className="w-full"
+                      title={u.isActive ? "Desactivar" : "Reactivar"}
+                    >
+                      <div className="inline-flex items-center gap-2">
+                        <Power className="h-4 w-4" />
+                        {u.isActive ? "Desactivar" : "Reactivar"}
+                      </div>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {!loadingList && filtered.length === 0 && (
+          <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
+            No hay usuarios para mostrar.
+          </div>
+        )}
+      </div>
+
+      {/* Create Drawer/Modal */}
+      <Modal
+        open={createOpen}
+        title="Crear usuario"
+        onClose={() => setCreateOpen(false)}
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+            Como ADMIN podés crear <b>USER</b>, <b>MANAGER</b> o <b>CASHIER</b>{" "}
+            para tu sucursal.
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Email">
+              <Input
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="mail@dominio.com"
+              />
+            </Field>
+
+            <Field label="Password">
+              <Input
+                type="password"
+                value={newPass}
+                onChange={(e) => setNewPass(e.target.value)}
+                placeholder="••••••••"
+              />
+            </Field>
+
+            <Field label="Username (opcional)">
+              <Input
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="Nombre visible"
+              />
+            </Field>
+
+            <Field label="Rol">
+              <Select
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as Role)}
+              >
+                <option value="USER">USER</option>
+                <option value="MANAGER">MANAGER</option>
+                <option value="CASHIER">CASHIER</option>
+              </Select>
+            </Field>
+          </div>
+
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setCreateOpen(false)}
+              className="w-full sm:w-auto"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={createUser}
+              disabled={!canCreate}
+              className="w-full sm:w-auto"
+            >
+              <div className="inline-flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Crear
+              </div>
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Reset modal */}
       <Modal
         open={resetOpen}
@@ -508,7 +701,8 @@ export default function AdminUsersPage() {
           value={resetPass}
           onChange={(e) => setResetPass(e.target.value)}
         />
-        <div className="mt-4 flex justify-end gap-2">
+
+        <div className="mt-4 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
           <Button
             variant="secondary"
             onClick={() => {
@@ -516,10 +710,15 @@ export default function AdminUsersPage() {
               setResetUser(null);
               setResetPass("");
             }}
+            className="w-full sm:w-auto"
           >
             Cancelar
           </Button>
-          <Button onClick={submitReset} disabled={busyAction || !resetPass}>
+          <Button
+            onClick={submitReset}
+            disabled={busyAction || !resetPass}
+            className="w-full sm:w-auto"
+          >
             Confirmar
           </Button>
         </div>
@@ -560,6 +759,7 @@ function Modal({
           <button
             onClick={onClose}
             className="rounded-xl border border-zinc-200 p-2 hover:bg-zinc-50"
+            aria-label="Cerrar"
           >
             <X className="h-4 w-4" />
           </button>

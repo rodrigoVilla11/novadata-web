@@ -113,6 +113,76 @@ function cmpStr(a: string, b: string) {
   return a.localeCompare(b, "es", { sensitivity: "base" });
 }
 
+/* =============================================================================
+ * Drawer (simple)
+ * ============================================================================= */
+
+function Drawer({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  // cerrar con Escape
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  return (
+    <>
+      {/* overlay */}
+      <div
+        className={cn(
+          "fixed inset-0 z-40 bg-black/40 transition-opacity",
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        )}
+        onMouseDown={onClose}
+      />
+
+      {/* panel */}
+      <div
+        className={cn(
+          "fixed right-0 top-0 z-50 h-full w-full max-w-md transform border-l border-zinc-200 bg-white shadow-2xl transition-transform",
+          open ? "translate-x-0" : "translate-x-full"
+        )}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-start justify-between gap-3 border-b border-zinc-100 p-5">
+            <div>
+              <div className="text-lg font-semibold text-zinc-900">{title}</div>
+              <div className="mt-1 text-sm text-zinc-500">
+                Completá los datos y guardá.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-zinc-200 bg-white p-2 text-zinc-700 hover:bg-zinc-50"
+              title="Cerrar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-auto p-5">{children}</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function AdminTasksPage() {
   const { getAccessToken } = useAuth();
 
@@ -121,7 +191,7 @@ export default function AdminTasksPage() {
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
 
-  const [areaFilter, setAreaFilter] = useState(""); // NEW (filtro exacto backend)
+  const [areaFilter, setAreaFilter] = useState(""); // backend exact
 
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -132,7 +202,7 @@ export default function AdminTasksPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  // create form (colapsable)
+  // Drawer create
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [area, setArea] = useState("");
@@ -143,6 +213,7 @@ export default function AdminTasksPage() {
   const [editArea, setEditArea] = useState("");
 
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const createNameRef = useRef<HTMLInputElement | null>(null);
 
   function flashOk(msg: string) {
     setOk(msg);
@@ -168,7 +239,7 @@ export default function AdminTasksPage() {
     if (!opts?.silentOk) setOk(null);
     setLoadingList(true);
     try {
-      const url = buildListUrl(); // NEW
+      const url = buildListUrl();
       const data = await apiFetchAuthed<TaskRow[]>(getAccessToken, url);
       setItems(Array.isArray(data) ? data : []);
       if (!opts?.silentOk) flashOk("Datos actualizados ✔");
@@ -185,7 +256,7 @@ export default function AdminTasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // NEW: recargar cuando cambian filtros backend
+  // recargar cuando cambian filtros backend
   useEffect(() => {
     load({ silentOk: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -205,13 +276,21 @@ export default function AdminTasksPage() {
         searchRef.current?.focus();
       }
       if (e.key === "Escape") {
-        if (editingId) cancelEdit();
+        if (createOpen) setCreateOpen(false);
+        else if (editingId) cancelEdit();
         else if (qRaw) setQRaw("");
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editingId, qRaw]);
+  }, [editingId, qRaw, createOpen]);
+
+  // cuando abre drawer, foco al input
+  useEffect(() => {
+    if (!createOpen) return;
+    const t = window.setTimeout(() => createNameRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [createOpen]);
 
   const totals = useMemo(() => {
     const total = items.length;
@@ -265,6 +344,11 @@ export default function AdminTasksPage() {
     setEditArea("");
   }
 
+  function resetCreateForm() {
+    setName("");
+    setArea("");
+  }
+
   async function createTask() {
     const n = name.trim();
     if (!n) return;
@@ -291,10 +375,11 @@ export default function AdminTasksPage() {
         }),
       });
 
-      setName("");
-      setArea("");
+      resetCreateForm();
+      setCreateOpen(false);
       flashOk("Tarea creada ✔");
       await load({ silentOk: true });
+      searchRef.current?.focus();
     } catch (e: any) {
       setItems((prev) => prev.filter((x) => x.id !== tempId));
       setError(e?.message || "Error creando tarea");
@@ -408,6 +493,17 @@ export default function AdminTasksPage() {
 
             <div className="flex items-center gap-2">
               <Button
+                onClick={() => setCreateOpen(true)}
+                disabled={busy}
+                title="Nueva tarea"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Nueva tarea
+                </span>
+              </Button>
+
+              <Button
                 variant="secondary"
                 onClick={() => load()}
                 disabled={busy}
@@ -445,6 +541,7 @@ export default function AdminTasksPage() {
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Input
+                ref={searchRef}
                 value={qRaw}
                 onChange={(e) => setQRaw(e.target.value)}
                 placeholder="Buscar por nombre o área…"
@@ -462,7 +559,7 @@ export default function AdminTasksPage() {
               )}
             </div>
 
-            {/* NEW: filtro por área exacto (backend) */}
+            {/* filtro por área exacto (backend) */}
             <Input
               value={areaFilter}
               onChange={(e) => setAreaFilter(e.target.value)}
@@ -521,83 +618,6 @@ export default function AdminTasksPage() {
           </div>
         </div>
 
-        {/* Create */}
-        <Card>
-          <div className="flex items-start justify-between gap-4 px-5 pt-5">
-            <div>
-              <div className="text-base font-semibold text-zinc-900">
-                Crear tarea
-              </div>
-              <div className="mt-1 text-sm text-zinc-500">
-                Nombre + área opcional (Cocina, Barra, Depósito).
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setCreateOpen((v) => !v)}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-            >
-              {createOpen ? "Ocultar" : "Mostrar"}
-            </button>
-          </div>
-
-          {createOpen && (
-            <CardBody>
-              <div className="grid gap-4 md:grid-cols-4">
-                <Field label="Nombre">
-                  <div className="relative">
-                    <ClipboardList className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Ej: Lavar plancha"
-                      className="pl-9"
-                    />
-                  </div>
-                </Field>
-
-                <Field label="Área (opcional)">
-                  <Input
-                    value={area}
-                    onChange={(e) => setArea(e.target.value)}
-                    placeholder="Ej: Cocina"
-                  />
-                </Field>
-
-                <div className="flex items-end">
-                  <Button
-                    className="w-full"
-                    onClick={createTask}
-                    disabled={busy || !name.trim()}
-                    loading={busy}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Plus className="h-4 w-4" />
-                      Crear
-                    </span>
-                  </Button>
-                </div>
-
-                <div className="flex items-end">
-                  <Button
-                    className="w-full"
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => {
-                      setName("");
-                      setArea("");
-                      setError(null);
-                      setOk(null);
-                    }}
-                  >
-                    Limpiar
-                  </Button>
-                </div>
-              </div>
-            </CardBody>
-          )}
-        </Card>
-
         {/* List */}
         <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-100 px-5 py-4">
@@ -617,11 +637,7 @@ export default function AdminTasksPage() {
                   Probá limpiar filtros o crear una nueva tarea.
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => {
-                      setCreateOpen(true);
-                    }}
-                  >
+                  <Button onClick={() => setCreateOpen(true)}>
                     <span className="inline-flex items-center gap-2">
                       <Plus className="h-4 w-4" />
                       Crear tarea
@@ -632,7 +648,7 @@ export default function AdminTasksPage() {
                     onClick={() => {
                       setQRaw("");
                       setOnlyActive(false);
-                      setAreaFilter(""); // NEW
+                      setAreaFilter("");
                       setSortKey("name");
                       setSortDir("asc");
                     }}
@@ -797,6 +813,75 @@ export default function AdminTasksPage() {
             mentalmente rápido.
           </div>
         </div>
+
+        {/* Drawer Create */}
+        <Drawer
+          open={createOpen}
+          onClose={() => {
+            if (busy) return;
+            setCreateOpen(false);
+          }}
+          title="Nueva tarea"
+        >
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700">
+              Nombre + área opcional (Cocina, Barra, Depósito).
+            </div>
+
+            <Field label="Nombre">
+              <div className="relative">
+                <ClipboardList className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  ref={createNameRef}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ej: Lavar plancha"
+                  className="pl-9"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createTask();
+                  }}
+                />
+              </div>
+            </Field>
+
+            <Field label="Área (opcional)">
+              <Input
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+                placeholder="Ej: Cocina"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") createTask();
+                }}
+              />
+            </Field>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button
+                onClick={createTask}
+                disabled={busy || !name.trim()}
+                loading={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Crear
+                </span>
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  resetCreateForm();
+                  setError(null);
+                  setOk(null);
+                  setCreateOpen(false);
+                }}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </Drawer>
       </div>
     </AdminProtected>
   );

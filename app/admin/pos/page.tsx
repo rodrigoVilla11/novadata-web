@@ -8,7 +8,6 @@ import type {
   CustomerSnapshot,
   FinanceCategory,
   Fulfillment,
-  PaymentMethod,
   PosCartItem,
   PosPaymentDraft,
   Product,
@@ -40,6 +39,205 @@ import PaymentsCard from "@/components/admin/pos/PaymentsCard";
 import SalesTable from "@/components/admin/pos/SalesTable";
 import VoidSaleModal from "@/components/admin/pos/VoidSaleModal";
 import { getUnitPrice } from "@/lib/adminPos/ui";
+
+/* =============================================================================
+ * Minimal Drawer (no deps)
+ * - Bottom sheet on mobile, right panel on desktop if you want
+ * ========================================================================== */
+
+function Drawer({
+  open,
+  onClose,
+  title,
+  children,
+  side = "bottom",
+  widthClass = "max-w-xl",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: React.ReactNode;
+  side?: "bottom" | "right";
+  widthClass?: string;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    // Focus the panel for accessibility
+    setTimeout(() => panelRef.current?.focus(), 0);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const panelPos =
+    side === "bottom"
+      ? "left-0 right-0 bottom-0"
+      : "right-0 top-0 bottom-0";
+
+  const panelShape =
+    side === "bottom"
+      ? "rounded-t-3xl"
+      : "rounded-l-3xl";
+
+  const panelSize =
+    side === "bottom"
+      ? "max-h-[85vh]"
+      : `h-full w-full ${widthClass}`;
+
+  return (
+    <div className="fixed inset-0 z-60">
+      {/* Overlay */}
+      <button
+        aria-label="Cerrar"
+        className="absolute inset-0 bg-black/35"
+        onClick={onClose}
+      />
+      {/* Panel */}
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className={cn(
+          "absolute bg-white shadow-2xl outline-none",
+          panelPos,
+          panelShape,
+          panelSize,
+          side === "bottom" ? "border-t border-zinc-200" : "border-l border-zinc-200"
+        )}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-10 rounded-full bg-zinc-200 md:hidden" />
+            {title ? (
+              <h3 className="text-sm font-semibold text-zinc-900">{title}</h3>
+            ) : (
+              <span className="text-sm font-semibold text-zinc-900">Detalle</span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-zinc-50"
+          >
+            Cerrar
+          </button>
+        </div>
+
+        <div className="h-full overflow-auto p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+ * Small KPI bar for mobile (keeps everything visible without scrolling)
+ * ========================================================================== */
+
+function KpiBar({
+  cartTotal,
+  paymentsTotal,
+  diff,
+  canCheckout,
+  deliveryNeedsData,
+}: {
+  cartTotal: number;
+  paymentsTotal: number;
+  diff: number;
+  canCheckout: boolean;
+  deliveryNeedsData: boolean;
+}) {
+  const diffKind =
+    paymentsTotal <= 0
+      ? "idle"
+      : diff < 0
+      ? "missing"
+      : diff === 0
+      ? "ok"
+      : "change";
+
+  const diffLabel =
+    diffKind === "idle"
+      ? "Ingresá pagos"
+      : diffKind === "missing"
+      ? `Falta $ ${Math.abs(diff).toLocaleString("es-AR")}`
+      : diffKind === "ok"
+      ? "Exacto"
+      : `Vuelto $ ${Math.abs(diff).toLocaleString("es-AR")}`;
+
+  return (
+    <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
+      <div className="rounded-xl bg-zinc-50 px-3 py-2">
+        <div className="text-[11px] font-semibold text-zinc-500">Total</div>
+        <div className="text-sm font-bold text-zinc-900">
+          $ {cartTotal.toLocaleString("es-AR")}
+        </div>
+      </div>
+      <div className="rounded-xl bg-zinc-50 px-3 py-2">
+        <div className="text-[11px] font-semibold text-zinc-500">Pagado</div>
+        <div className="text-sm font-bold text-zinc-900">
+          $ {paymentsTotal.toLocaleString("es-AR")}
+        </div>
+      </div>
+      <div
+        className={cn(
+          "rounded-xl px-3 py-2",
+          diffKind === "ok"
+            ? "bg-emerald-50"
+            : diffKind === "change"
+            ? "bg-sky-50"
+            : diffKind === "missing"
+            ? "bg-amber-50"
+            : "bg-zinc-50"
+        )}
+      >
+        <div className="text-[11px] font-semibold text-zinc-500">Diferencia</div>
+        <div
+          className={cn(
+            "text-sm font-bold",
+            diffKind === "ok"
+              ? "text-emerald-700"
+              : diffKind === "change"
+              ? "text-sky-700"
+              : diffKind === "missing"
+              ? "text-amber-700"
+              : "text-zinc-900"
+          )}
+        >
+          {diffLabel}
+        </div>
+        {deliveryNeedsData && (
+          <div className="mt-1 text-[10px] font-semibold text-amber-700">
+            Faltan datos delivery
+          </div>
+        )}
+        {!deliveryNeedsData && canCheckout && (
+          <div className="mt-1 text-[10px] font-semibold text-emerald-700">
+            Listo para cobrar
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+ * Page
+ * ========================================================================== */
 
 export default function AdminPosPage() {
   const { getAccessToken, user } = useAuth();
@@ -76,12 +274,10 @@ export default function AdminPosPage() {
   const [payments, setPayments] = useState<PosPaymentDraft[]>([
     { method: "CASH", amount: 0 },
   ]);
-
   const paymentsTotal = useMemo(
     () => payments.reduce((acc, p) => acc + num(p.amount), 0),
     [payments]
   );
-
   const diff = useMemo(() => paymentsTotal - cartTotal, [paymentsTotal, cartTotal]);
 
   // Optional: keep existing customerId (DB customer)
@@ -114,6 +310,12 @@ export default function AdminPosPage() {
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidSaleId, setVoidSaleId] = useState<string | null>(null);
   const [voidDefaultDateKey, setVoidDefaultDateKey] = useState<string | null>(null);
+
+  // Drawers (mobile UX)
+  const [drawerProducts, setDrawerProducts] = useState(false);
+  const [drawerCart, setDrawerCart] = useState(false);
+  const [drawerPayments, setDrawerPayments] = useState(false);
+  const [drawerOrder, setDrawerOrder] = useState(false);
 
   // Search debounce
   const debounceRef = useRef<any>(null);
@@ -219,6 +421,10 @@ export default function AdminPosPage() {
         },
       ];
     });
+
+    // Micro feedback (no layout jump: keep short)
+    setOk(`Agregado: ${p.name}`);
+    setTimeout(() => setOk(null), 650);
   }
 
   function setCartQty(productId: string, qtyDraft: string) {
@@ -284,6 +490,23 @@ export default function AdminPosPage() {
     });
   }
 
+  // UX helper: set "exact amount" into a line
+  function setPayExact(ix = 0) {
+    setPayments((prev) => {
+      const other = prev.reduce(
+        (acc, p, i) => (i === ix ? acc : acc + num(p.amount)),
+        0
+      );
+      const need = Math.max(0, cartTotal - other);
+      const copy = [...prev];
+      if (!copy[ix]) return prev;
+      copy[ix] = { ...copy[ix], amount: need };
+      return copy;
+    });
+    setOk("Monto exacto aplicado ✔");
+    setTimeout(() => setOk(null), 650);
+  }
+
   const deliveryNeedsData = useMemo(() => {
     if (fulfillment !== "DELIVERY") return false;
     const nameOk = !!String(customerSnapshot.name ?? "").trim();
@@ -309,6 +532,16 @@ export default function AdminPosPage() {
     if (deliveryNeedsData) return false;
     return true;
   }, [canUsePos, cart.length, payments.length, cartTotal, paymentsTotal, deliveryNeedsData]);
+
+  const posStatus = useMemo(() => {
+    if (!canUsePos) return { kind: "blocked" as const, label: "Sin permisos" };
+    if (!cart.length) return { kind: "idle" as const, label: "Agregá productos" };
+    if (deliveryNeedsData) return { kind: "warn" as const, label: "Faltan datos delivery" };
+    if (paymentsTotal <= 0) return { kind: "warn" as const, label: "Ingresá un pago" };
+    if (paymentsTotal < cartTotal) return { kind: "warn" as const, label: "Falta dinero" };
+    if (paymentsTotal === cartTotal) return { kind: "ok" as const, label: "Listo para cobrar" };
+    return { kind: "change" as const, label: "Listo (con vuelto)" };
+  }, [canUsePos, cart.length, deliveryNeedsData, paymentsTotal, cartTotal]);
 
   // ---------------- POS actions ----------------
 
@@ -346,7 +579,11 @@ export default function AdminPosPage() {
     setOk(null);
 
     if (!canCreateOrder) {
-      setErr(deliveryNeedsData ? "Delivery: completá al menos Nombre y Dirección." : "Agregá productos para crear el pedido.");
+      setErr(
+        deliveryNeedsData
+          ? "Delivery: completá al menos Nombre y Dirección."
+          : "Agregá productos para crear el pedido."
+      );
       return;
     }
 
@@ -385,7 +622,11 @@ export default function AdminPosPage() {
     setOk(null);
 
     if (!canCheckout) {
-      setErr(deliveryNeedsData ? "Delivery: completá al menos Nombre y Dirección." : "Revisá carrito y pagos (pagos deben cubrir el total).");
+      setErr(
+        deliveryNeedsData
+          ? "Delivery: completá al menos Nombre y Dirección."
+          : "Revisá carrito y pagos (pagos deben cubrir el total)."
+      );
       return;
     }
 
@@ -418,6 +659,7 @@ export default function AdminPosPage() {
       setTimeout(() => setOk(null), 1600);
 
       clearCart();
+      setDrawerPayments(false); // UX: cerrar drawer al cobrar
       await loadSales();
     } catch (e: any) {
       setErr(String(e?.message || "Error en checkout"));
@@ -426,7 +668,15 @@ export default function AdminPosPage() {
     }
   }
 
-  async function confirmVoid({ saleId, reason, dateKey }: { saleId: string; reason: string; dateKey: string }) {
+  async function confirmVoid({
+    saleId,
+    reason,
+    dateKey,
+  }: {
+    saleId: string;
+    reason: string;
+    dateKey: string;
+  }) {
     setBusy(true);
     setErr(null);
     try {
@@ -445,6 +695,38 @@ export default function AdminPosPage() {
     }
   }
 
+  // ---------------- Keyboard UX (POS-like) ----------------
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!canUsePos) return;
+      if (e.key === "F2") {
+        // Open products drawer on mobile
+        e.preventDefault();
+        setDrawerProducts(true);
+      }
+      if (e.key === "F8") {
+        e.preventDefault();
+        setDrawerPayments(true);
+      }
+      if (e.key === "F9") {
+        e.preventDefault();
+        if (canCheckout && !busy && !creatingOrder) checkout();
+      }
+      if (e.key === "Escape") {
+        // Clear search if present, else close drawers
+        if (q) setQ("");
+        else {
+          setDrawerProducts(false);
+          setDrawerCart(false);
+          setDrawerPayments(false);
+          setDrawerOrder(false);
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canUsePos, canCheckout, busy, creatingOrder, q]);
+
   // ---------------- UI helpers ----------------
 
   function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -453,9 +735,12 @@ export default function AdminPosPage() {
     addToCart(products[0]);
   }
 
+  const busyHard = busy || creatingOrder;
+
   return (
     <AdminProtected>
-      <div className="space-y-6">
+      <div className="space-y-4">
+        {/* Header stays */}
         <PosHeader
           dateKey={dateKey}
           setDateKey={setDateKey}
@@ -471,34 +756,213 @@ export default function AdminPosPage() {
           onRefresh={refreshAll}
         />
 
-        <OrderCard
-          canUsePos={canUsePos}
-          busy={busy}
-          fulfillment={fulfillment}
-          setFulfillment={setFulfillment}
-          customerSnapshot={customerSnapshot}
-          setCustomerSnapshot={setCustomerSnapshot}
-          deliveryNeedsData={deliveryNeedsData}
-          customerId={customerId}
-          setCustomerId={setCustomerId}
-        />
+        {/* Mobile KPI + quick actions */}
+        <div className="lg:hidden space-y-3">
+          <KpiBar
+            cartTotal={cartTotal}
+            paymentsTotal={paymentsTotal}
+            diff={diff}
+            canCheckout={canCheckout}
+            deliveryNeedsData={deliveryNeedsData}
+          />
 
-        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
+              disabled={!canUsePos || busyHard}
+              onClick={() => setDrawerProducts(true)}
+            >
+              Productos (F2)
+            </button>
+            <button
+              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
+              disabled={!canUsePos || busyHard}
+              onClick={() => setDrawerCart(true)}
+            >
+              Carrito ({cart.length})
+            </button>
+            <button
+              className={cn(
+                "rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-60",
+                posStatus.kind === "ok" || posStatus.kind === "change"
+                  ? "bg-zinc-900 text-white hover:bg-zinc-800"
+                  : "border border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
+              )}
+              disabled={!canUsePos || busyHard || (!cart.length && posStatus.kind !== "warn")}
+              onClick={() => setDrawerPayments(true)}
+            >
+              Cobrar (F8)
+            </button>
+            <button
+              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
+              disabled={!canUsePos || busyHard}
+              onClick={() => setDrawerOrder(true)}
+            >
+              Cliente/Entrega
+            </button>
+          </div>
+
+          {/* Sales table compact on mobile */}
+          <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <div className="border-b border-zinc-100 px-4 py-3">
+              <div className="text-sm font-semibold text-zinc-900">Ventas del día</div>
+              <div className="text-xs text-zinc-500">Anular desde la tabla</div>
+            </div>
+            <div className="p-2">
+              <SalesTable
+                sales={sales}
+                loadingSales={loadingSales}
+                loading={loading}
+                busy={busy}
+                dateKey={dateKey}
+                onVoidClick={(s) => {
+                  const voided = s.status === "VOIDED";
+                  if (voided) return;
+                  setVoidSaleId(s.id);
+                  setVoidDefaultDateKey(s.paidDateKey || dateKey);
+                  setVoidOpen(true);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop layout (same but tighter spacing / better grid) */}
+        <div className="hidden lg:block space-y-6">
+          <OrderCard
+            canUsePos={canUsePos}
+            busy={busyHard}
+            fulfillment={fulfillment}
+            setFulfillment={setFulfillment}
+            customerSnapshot={customerSnapshot}
+            setCustomerSnapshot={setCustomerSnapshot}
+            deliveryNeedsData={deliveryNeedsData}
+            customerId={customerId}
+            setCustomerId={setCustomerId}
+          />
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ProductsCard
+              canUsePos={canUsePos}
+              busy={busyHard}
+              q={q}
+              setQ={setQ}
+              products={products}
+              loadingProducts={loadingProducts}
+              onSearchClick={() => searchProducts(q)}
+              onSearchKeyDown={onSearchKeyDown}
+              onAddToCart={addToCart}
+            />
+
+            <CartCard
+              canUsePos={canUsePos}
+              busy={busyHard}
+              cart={cart}
+              cartTotal={cartTotal}
+              onRemoveItem={removeCartItem}
+              onSetQty={setCartQty}
+              onSetNote={setCartNote}
+              onClear={clearCart}
+            />
+          </div>
+
+          <PaymentsCard
+            canUsePos={canUsePos}
+            busy={busyHard}
+            loading={loading}
+            creatingOrder={creatingOrder}
+            payments={payments}
+            onAddPaymentLine={addPaymentLine}
+            onRemovePaymentLine={removePaymentLine}
+            onUpdatePayment={updatePayment}
+            cartTotal={cartTotal}
+            paymentsTotal={paymentsTotal}
+            diff={diff}
+            fulfillment={fulfillment}
+            deliveryNeedsData={deliveryNeedsData}
+            concept={concept}
+            setConcept={setConcept}
+            categoryId={categoryId}
+            setCategoryId={setCategoryId}
+            note={note}
+            setNote={setNote}
+            activeCategories={activeCategories}
+            canCreateOrder={canCreateOrder}
+            canCheckout={canCheckout}
+            onCreateOrderOnly={createOrderOnly}
+            onCheckout={checkout}
+          />
+
+          <SalesTable
+            sales={sales}
+            loadingSales={loadingSales}
+            loading={loading}
+            busy={busy}
+            dateKey={dateKey}
+            onVoidClick={(s) => {
+              const voided = s.status === "VOIDED";
+              if (voided) return;
+              setVoidSaleId(s.id);
+              setVoidDefaultDateKey(s.paidDateKey || dateKey);
+              setVoidOpen(true);
+            }}
+          />
+        </div>
+
+        {/* ---------------- Drawers (mobile) ---------------- */}
+        <Drawer
+          open={drawerProducts}
+          onClose={() => setDrawerProducts(false)}
+          title="Productos"
+          side="bottom"
+        >
           <ProductsCard
             canUsePos={canUsePos}
-            busy={busy}
+            busy={busyHard}
             q={q}
             setQ={setQ}
             products={products}
             loadingProducts={loadingProducts}
             onSearchClick={() => searchProducts(q)}
             onSearchKeyDown={onSearchKeyDown}
-            onAddToCart={addToCart}
+            onAddToCart={(p) => {
+              addToCart(p);
+              // UX: keep drawer open for rapid add; you can close if you prefer
+            }}
           />
+          <div className="mt-3 flex gap-2">
+            <button
+              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+              disabled={busyHard}
+              onClick={() => {
+                setDrawerProducts(false);
+                setDrawerCart(true);
+              }}
+            >
+              Ir al carrito
+            </button>
+            <button
+              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+              disabled={busyHard || !cart.length}
+              onClick={() => {
+                setDrawerProducts(false);
+                setDrawerPayments(true);
+              }}
+            >
+              Cobrar
+            </button>
+          </div>
+        </Drawer>
 
+        <Drawer
+          open={drawerCart}
+          onClose={() => setDrawerCart(false)}
+          title={`Carrito (${cart.length})`}
+          side="bottom"
+        >
           <CartCard
             canUsePos={canUsePos}
-            busy={busy}
+            busy={busyHard}
             cart={cart}
             cartTotal={cartTotal}
             onRemoveItem={removeCartItem}
@@ -506,50 +970,125 @@ export default function AdminPosPage() {
             onSetNote={setCartNote}
             onClear={clearCart}
           />
-        </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+              disabled={busyHard}
+              onClick={() => {
+                setDrawerCart(false);
+                setDrawerProducts(true);
+              }}
+            >
+              Seguir agregando
+            </button>
+            <button
+              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+              disabled={busyHard || !cart.length}
+              onClick={() => {
+                setDrawerCart(false);
+                setDrawerPayments(true);
+              }}
+            >
+              Ir a cobrar
+            </button>
+          </div>
+        </Drawer>
 
-        <PaymentsCard
-          canUsePos={canUsePos}
-          busy={busy}
-          loading={loading}
-          creatingOrder={creatingOrder}
-          payments={payments}
-          onAddPaymentLine={addPaymentLine}
-          onRemovePaymentLine={removePaymentLine}
-          onUpdatePayment={updatePayment}
-          cartTotal={cartTotal}
-          paymentsTotal={paymentsTotal}
-          diff={diff}
-          fulfillment={fulfillment}
-          deliveryNeedsData={deliveryNeedsData}
-          concept={concept}
-          setConcept={setConcept}
-          categoryId={categoryId}
-          setCategoryId={setCategoryId}
-          note={note}
-          setNote={setNote}
-          activeCategories={activeCategories}
-          canCreateOrder={canCreateOrder}
-          canCheckout={canCheckout}
-          onCreateOrderOnly={createOrderOnly}
-          onCheckout={checkout}
-        />
+        <Drawer
+          open={drawerOrder}
+          onClose={() => setDrawerOrder(false)}
+          title="Cliente / Entrega"
+          side="bottom"
+        >
+          <OrderCard
+            canUsePos={canUsePos}
+            busy={busyHard}
+            fulfillment={fulfillment}
+            setFulfillment={setFulfillment}
+            customerSnapshot={customerSnapshot}
+            setCustomerSnapshot={setCustomerSnapshot}
+            deliveryNeedsData={deliveryNeedsData}
+            customerId={customerId}
+            setCustomerId={setCustomerId}
+          />
+          <div className="mt-3 flex gap-2">
+            <button
+              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+              disabled={busyHard}
+              onClick={() => setDrawerOrder(false)}
+            >
+              Listo
+            </button>
+            <button
+              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+              disabled={busyHard}
+              onClick={() => {
+                setDrawerOrder(false);
+                setDrawerPayments(true);
+              }}
+            >
+              Ir a cobrar
+            </button>
+          </div>
+        </Drawer>
 
-        <SalesTable
-          sales={sales}
-          loadingSales={loadingSales}
-          loading={loading}
-          busy={busy}
-          dateKey={dateKey}
-          onVoidClick={(s) => {
-            const voided = s.status === "VOIDED";
-            if (voided) return;
-            setVoidSaleId(s.id);
-            setVoidDefaultDateKey(s.paidDateKey || dateKey);
-            setVoidOpen(true);
-          }}
-        />
+        <Drawer
+          open={drawerPayments}
+          onClose={() => setDrawerPayments(false)}
+          title="Cobrar"
+          side="bottom"
+        >
+          {/* Quick actions on top for mobile */}
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <button
+              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+              disabled={busyHard || !cart.length}
+              onClick={() => setPayExact(0)}
+            >
+              Pagar exacto
+            </button>
+            <button
+              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+              disabled={busyHard || !cart.length}
+              onClick={() => {
+                // UX: open cart quickly
+                setDrawerPayments(false);
+                setDrawerCart(true);
+              }}
+            >
+              Ver carrito
+            </button>
+          </div>
 
+          <PaymentsCard
+            canUsePos={canUsePos}
+            busy={busyHard}
+            loading={loading}
+            creatingOrder={creatingOrder}
+            payments={payments}
+            onAddPaymentLine={addPaymentLine}
+            onRemovePaymentLine={removePaymentLine}
+            onUpdatePayment={updatePayment}
+            cartTotal={cartTotal}
+            paymentsTotal={paymentsTotal}
+            diff={diff}
+            fulfillment={fulfillment}
+            deliveryNeedsData={deliveryNeedsData}
+            concept={concept}
+            setConcept={setConcept}
+            categoryId={categoryId}
+            setCategoryId={setCategoryId}
+            note={note}
+            setNote={setNote}
+            activeCategories={activeCategories}
+            canCreateOrder={canCreateOrder}
+            canCheckout={canCheckout}
+            onCreateOrderOnly={createOrderOnly}
+            onCheckout={checkout}
+          />
+        </Drawer>
+
+        {/* Void modal */}
         {voidSaleId && (
           <VoidSaleModal
             open={voidOpen}

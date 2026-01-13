@@ -21,7 +21,7 @@ export default function AdminLayout({
   return (
     <AdminProtected allow={["ADMIN", "MANAGER"]}>
       {/* Fondo global del área admin */}
-      <div className="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100">
+      <div className="min-h-screen bg-linear-to-b from-zinc-50 to-zinc-100">
         {/* Shell (sidebar + header) */}
         <AdminShell>
           {/* Contenido */}

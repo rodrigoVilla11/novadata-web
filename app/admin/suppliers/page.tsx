@@ -178,7 +178,9 @@ function isOrderClosed(status: PurchaseOrderStatus) {
 }
 
 function canReceive(status: PurchaseOrderStatus) {
-  return status === "SENT" || status === "CONFIRMED" || status === "RECEIVED_PARTIAL";
+  return (
+    status === "SENT" || status === "CONFIRMED" || status === "RECEIVED_PARTIAL"
+  );
 }
 
 function poStatusLabel(s: PurchaseOrderStatus) {
@@ -315,16 +317,19 @@ function SupplierModal({
   }
 
   const isAccount = form.workMode === "ACCOUNT";
-  const paymentDaysStr = form.paymentDays == null ? "" : String(form.paymentDays);
+  const paymentDaysStr =
+    form.paymentDays == null ? "" : String(form.paymentDays);
 
   return (
-    <div className="fixed inset-0 z-[70]">
+    <div className="fixed inset-0 z-70">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-1/2 top-10 w-[min(920px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
             <div className="text-xs text-zinc-500">Editar proveedor</div>
-            <div className="text-lg font-semibold text-zinc-900">{initial.name}</div>
+            <div className="text-lg font-semibold text-zinc-900">
+              {initial.name}
+            </div>
           </div>
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             <span className="inline-flex items-center gap-2">
@@ -339,7 +344,9 @@ function SupplierModal({
             <Field label="Nombre">
               <Input
                 value={(form.name ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, name: e.target.value }))
+                }
                 placeholder="Ej: Distribuidora Pepe"
               />
             </Field>
@@ -351,7 +358,10 @@ function SupplierModal({
                   setForm((p) => ({
                     ...p,
                     workMode: e.target.value as SupplierWorkMode,
-                    paymentDays: e.target.value === "IMMEDIATE" ? null : p.paymentDays ?? null,
+                    paymentDays:
+                      e.target.value === "IMMEDIATE"
+                        ? null
+                        : p.paymentDays ?? null,
                   }))
                 }
               >
@@ -368,7 +378,10 @@ function SupplierModal({
                 onChange={(e) =>
                   setForm((p) => ({
                     ...p,
-                    paymentDays: e.target.value.trim() === "" ? null : Number(e.target.value),
+                    paymentDays:
+                      e.target.value.trim() === ""
+                        ? null
+                        : Number(e.target.value),
                   }))
                 }
                 placeholder={isAccount ? "Ej: 15 / 30 / 45" : "—"}
@@ -379,7 +392,9 @@ function SupplierModal({
 
             <Field label="Días de pedido">
               <div className="flex flex-wrap gap-2">
-                {(["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as Weekday[]).map((d) => {
+                {(
+                  ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as Weekday[]
+                ).map((d) => {
                   const active = orderDays.includes(d);
                   return (
                     <button
@@ -406,7 +421,9 @@ function SupplierModal({
             <Field label="Hora límite (cutoff)">
               <Input
                 value={(form.cutoffTime ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, cutoffTime: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, cutoffTime: e.target.value }))
+                }
                 placeholder='Ej: "12:00"'
               />
             </Field>
@@ -417,7 +434,10 @@ function SupplierModal({
                 onChange={(e) =>
                   setForm((p) => ({
                     ...p,
-                    leadTimeDays: e.target.value.trim() === "" ? null : Number(e.target.value),
+                    leadTimeDays:
+                      e.target.value.trim() === ""
+                        ? null
+                        : Number(e.target.value),
                   }))
                 }
                 placeholder="Ej: 1 / 2 / 3"
@@ -430,37 +450,49 @@ function SupplierModal({
             <Field label="Contacto">
               <Input
                 value={(form.contactName ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, contactName: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, contactName: e.target.value }))
+                }
               />
             </Field>
             <Field label="Teléfono">
               <Input
                 value={(form.phone ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, phone: e.target.value }))
+                }
               />
             </Field>
             <Field label="Email">
               <Input
                 value={(form.email ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, email: e.target.value }))
+                }
               />
             </Field>
             <Field label="CUIT / Tax ID">
               <Input
                 value={(form.taxId ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, taxId: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, taxId: e.target.value }))
+                }
               />
             </Field>
             <Field label="Dirección">
               <Input
                 value={(form.address ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, address: e.target.value }))
+                }
               />
             </Field>
             <Field label="Notas">
               <Input
                 value={(form.notes ?? "") as string}
-                onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, notes: e.target.value }))
+                }
               />
             </Field>
           </div>
@@ -540,13 +572,15 @@ function IngredientPicker({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className="fixed inset-0 z-60">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-1/2 top-10 w-[min(920px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
             <div className="text-xs text-zinc-500">Seleccionar ingrediente</div>
-            <div className="text-lg font-semibold text-zinc-900">{supplier.name}</div>
+            <div className="text-lg font-semibold text-zinc-900">
+              {supplier.name}
+            </div>
           </div>
           <Button variant="secondary" onClick={onClose}>
             <span className="inline-flex items-center gap-2">
@@ -668,8 +702,17 @@ export default function AdminSuppliersPage() {
   const [address, setAddress] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // search supplier
+  // search supplier (texto)
   const [q, setQ] = useState("");
+
+  // filtros simples (no técnicos)
+  const [statusFilter, setStatusFilter] = useState<
+    "ALL" | "ACTIVE" | "INACTIVE"
+  >("ALL");
+  const [workModeFilter, setWorkModeFilter] = useState<
+    "ALL" | SupplierWorkMode
+  >("ALL");
+  const [orderDayFilter, setOrderDayFilter] = useState<"ALL" | Weekday>("ALL");
 
   // edit modal
   const [editOpen, setEditOpen] = useState(false);
@@ -705,11 +748,20 @@ export default function AdminSuppliersPage() {
   // Orders drawer state
   // ----------------------
   const [ordersOpen, setOrdersOpen] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(
+    null
+  );
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersBusy, setOrdersBusy] = useState(false);
+
+  // filtros simples para pedidos
+  const [poStatusFilter, setPoStatusFilter] = useState<
+    "ALL" | PurchaseOrderStatus
+  >("ALL");
+  const [poSearch, setPoSearch] = useState(""); // busca por item/nota/id
+  const [poOnlyOpen, setPoOnlyOpen] = useState(false);
 
   // create order form
   const [poNotes, setPoNotes] = useState("");
@@ -725,26 +777,56 @@ export default function AdminSuppliersPage() {
   >([{ ingredientId: "", qty: "" }]);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(null);
+  const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(
+    null
+  );
 
   // receive form (drafts per ingredient)
-  const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
+  const [receivePrices, setReceivePrices] = useState<Record<string, string>>(
+    {}
+  );
   const [receiveQtys, setReceiveQtys] = useState<Record<string, string>>({});
 
   // invoice url per order (controlled locally)
-  const [invoiceUrlByOrder, setInvoiceUrlByOrder] = useState<Record<string, string>>({});
-
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    if (!qq) return items;
-    return items.filter((s) => s.name.toLowerCase().includes(qq));
-  }, [items, q]);
+  const [invoiceUrlByOrder, setInvoiceUrlByOrder] = useState<
+    Record<string, string>
+  >({});
 
   const totals = useMemo(() => {
     const total = items.length;
     const active = items.filter((s) => s.isActive).length;
     return { total, active, inactive: total - active };
   }, [items]);
+
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+
+    return items.filter((s) => {
+      // texto
+      const matchesText =
+        !qq ||
+        s.name.toLowerCase().includes(qq) ||
+        String(s.phone ?? "").toLowerCase().includes(qq) ||
+        String(s.email ?? "").toLowerCase().includes(qq);
+
+      // estado
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "ACTIVE" ? s.isActive : !s.isActive);
+
+      // forma de trabajo
+      const matchesWorkMode =
+        workModeFilter === "ALL" ||
+        (s.workMode ?? "IMMEDIATE") === workModeFilter;
+
+      // día de pedido
+      const matchesDay =
+        orderDayFilter === "ALL" ||
+        (Array.isArray(s.orderDays) ? s.orderDays.includes(orderDayFilter) : false);
+
+      return matchesText && matchesStatus && matchesWorkMode && matchesDay;
+    });
+  }, [items, q, statusFilter, workModeFilter, orderDayFilter]);
 
   function flashOk(msg: string) {
     setOk(msg);
@@ -772,7 +854,9 @@ export default function AdminSuppliersPage() {
   }, []);
 
   function toggleCreateDay(d: Weekday) {
-    setOrderDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
+    setOrderDays((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
+    );
   }
 
   async function create(): Promise<boolean> {
@@ -894,12 +978,19 @@ export default function AdminSuppliersPage() {
   function openOrders(s: Supplier) {
     setSelectedSupplier(s);
     setOrdersOpen(true);
+
     setOrders([]);
     setPoNotes("");
     setPoLines([{ ingredientId: "", qty: "" }]);
     setReceivePrices({});
     setReceiveQtys({});
     setInvoiceUrlByOrder({});
+
+    // reset filtros pedidos
+    setPoStatusFilter("ALL");
+    setPoSearch("");
+    setPoOnlyOpen(false);
+
     loadOrders(s.id);
   }
 
@@ -1097,6 +1188,27 @@ export default function AdminSuppliersPage() {
     return { open, drafts, pendingReceive };
   }, [orders]);
 
+  const visibleOrders = useMemo(() => {
+    const qq = poSearch.trim().toLowerCase();
+
+    return orders.filter((o) => {
+      const matchesStatus = poStatusFilter === "ALL" || o.status === poStatusFilter;
+      const matchesOpen = !poOnlyOpen || !isOrderClosed(o.status);
+
+      const textHay =
+        !qq ||
+        o.id.toLowerCase().includes(qq) ||
+        String(o.notes ?? "").toLowerCase().includes(qq) ||
+        (o.items ?? []).some((it) =>
+          String(it.ingredientName ?? it.ingredientId ?? "")
+            .toLowerCase()
+            .includes(qq)
+        );
+
+      return matchesStatus && matchesOpen && textHay;
+    });
+  }, [orders, poSearch, poOnlyOpen, poStatusFilter]);
+
   return (
     <AdminProtected>
       <div className="space-y-6">
@@ -1154,23 +1266,120 @@ export default function AdminSuppliersPage() {
           </div>
         )}
 
-        {/* Toolbar (Search) */}
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar proveedor…"
-                className="pl-9"
-              />
+        {/* Toolbar (Search + filtros simples) */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-4 sm:p-5 shadow-sm">
+          <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+            {/* Buscar */}
+            <div className="lg:col-span-5">
+              <Field label="Buscar proveedor">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <Input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Nombre, teléfono o email…"
+                    className="pl-9"
+                  />
+                </div>
+              </Field>
+              <div className="mt-1 text-xs text-zinc-500">
+                {q.trim()
+                  ? `${filtered.length} resultado(s) · de ${items.length}`
+                  : `${items.length} proveedor(es)`}
+              </div>
             </div>
 
-            <div className="text-sm text-zinc-500">
-              {q.trim()
-                ? `${filtered.length} de ${items.length}`
-                : `${items.length} proveedor(es)`}
+            {/* Estado */}
+            <div className="lg:col-span-3">
+              <Field label="Estado">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { k: "ALL", label: "Todos" },
+                    { k: "ACTIVE", label: "Activos" },
+                    { k: "INACTIVE", label: "Inactivos" },
+                  ].map((x) => {
+                    const active = statusFilter === (x.k as any);
+                    return (
+                      <button
+                        key={x.k}
+                        type="button"
+                        onClick={() => setStatusFilter(x.k as any)}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-sm transition",
+                          active
+                            ? "bg-zinc-900 text-white border-zinc-900"
+                            : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                        )}
+                      >
+                        {x.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+            </div>
+
+            {/* Forma de trabajo */}
+            <div className="lg:col-span-2">
+              <Field label="Forma de trabajo">
+                <Select
+                  value={workModeFilter}
+                  onChange={(e) => setWorkModeFilter(e.target.value as any)}
+                >
+                  <option value="ALL">Todas</option>
+                  <option value="IMMEDIATE">Pago inmediato</option>
+                  <option value="AGAINST_INVOICE">Contra factura</option>
+                  <option value="ACCOUNT">Cuenta corriente</option>
+                  <option value="MIXED">Mixto</option>
+                </Select>
+              </Field>
+            </div>
+
+            {/* Día de pedido */}
+            <div className="lg:col-span-2">
+              <Field label="Día de pedido">
+                <Select
+                  value={orderDayFilter}
+                  onChange={(e) => setOrderDayFilter(e.target.value as any)}
+                >
+                  <option value="ALL">Cualquiera</option>
+                  {(Object.keys(WEEKDAY_LABEL) as Weekday[]).map((d) => (
+                    <option key={d} value={d}>
+                      {WEEKDAY_LABEL[d]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            {/* Botones */}
+            <div className="lg:col-span-12 flex flex-col sm:flex-row gap-2 sm:justify-end">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setQ("");
+                  setStatusFilter("ALL");
+                  setWorkModeFilter("ALL");
+                  setOrderDayFilter("ALL");
+                }}
+                className="w-full sm:w-auto"
+                title="Limpiar filtros"
+              >
+                Reset filtros
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={load}
+                loading={loading}
+                disabled={busy}
+                className="w-full sm:w-auto"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                  Actualizar
+                </span>
+              </Button>
             </div>
           </div>
         </div>
@@ -1267,7 +1476,7 @@ export default function AdminSuppliersPage() {
                           >
                             <span className="inline-flex items-center gap-2">
                               <Truck className="h-4 w-4" />
-                              Pedidos
+                              Ver pedidos
                             </span>
                           </Button>
 
@@ -1302,10 +1511,6 @@ export default function AdminSuppliersPage() {
               </tbody>
             </table>
           </div>
-
-          <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
-            Siguiente: en Stock usamos estos datos para sugerir día de pedido y cutoff automáticamente.
-          </div>
         </div>
 
         {/* Edit Modal */}
@@ -1329,7 +1534,9 @@ export default function AdminSuppliersPage() {
               <div className="flex items-center justify-between border-b px-5 py-4">
                 <div>
                   <div className="text-xs text-zinc-500">Nuevo proveedor</div>
-                  <div className="text-lg font-semibold text-zinc-900">Crear proveedor</div>
+                  <div className="text-lg font-semibold text-zinc-900">
+                    Crear proveedor
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1633,17 +1840,105 @@ export default function AdminSuppliersPage() {
                   </CardBody>
                 </Card>
 
+                {/* Filtros pedidos (simple) */}
+                <div className="rounded-3xl border border-zinc-200 bg-white p-4 sm:p-5 shadow-sm">
+                  <div className="grid gap-3 lg:grid-cols-12 lg:items-end">
+                    <div className="lg:col-span-5">
+                      <Field label="Buscar en pedidos">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                          <Input
+                            value={poSearch}
+                            onChange={(e) => setPoSearch(e.target.value)}
+                            placeholder="Ingrediente, nota o #pedido…"
+                            className="pl-9"
+                          />
+                        </div>
+                      </Field>
+                      <div className="mt-1 text-xs text-zinc-500">
+                        Mostrando <b>{visibleOrders.length}</b> de <b>{orders.length}</b>
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-5">
+                      <Field label="Estado">
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { k: "ALL", label: "Todos" },
+                            { k: "DRAFT", label: "Borrador" },
+                            { k: "SENT", label: "Enviado" },
+                            { k: "CONFIRMED", label: "Confirmado" },
+                            { k: "RECEIVED_PARTIAL", label: "Recib. parcial" },
+                            { k: "RECEIVED", label: "Recibido" },
+                            { k: "CANCELLED", label: "Cancelado" },
+                          ].map((x) => {
+                            const active = poStatusFilter === (x.k as any);
+                            return (
+                              <button
+                                key={x.k}
+                                type="button"
+                                onClick={() => setPoStatusFilter(x.k as any)}
+                                className={cn(
+                                  "rounded-full border px-3 py-1.5 text-sm transition",
+                                  active
+                                    ? "bg-zinc-900 text-white border-zinc-900"
+                                    : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                                )}
+                              >
+                                {x.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </Field>
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <Field label="Mostrar">
+                        <button
+                          type="button"
+                          onClick={() => setPoOnlyOpen((v) => !v)}
+                          className={cn(
+                            "w-full rounded-2xl border px-3 py-2 text-sm transition",
+                            poOnlyOpen
+                              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                              : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                          )}
+                        >
+                          {poOnlyOpen ? "Solo abiertos" : "Todos"}
+                        </button>
+                      </Field>
+                    </div>
+
+                    <div className="lg:col-span-12 flex flex-col sm:flex-row gap-2 sm:justify-end">
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setPoSearch("");
+                          setPoStatusFilter("ALL");
+                          setPoOnlyOpen(false);
+                        }}
+                        className="w-full sm:w-auto"
+                      >
+                        Reset pedidos
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Listado pedidos */}
                 <Card>
                   <CardHeader title="Pedidos" subtitle="Historial y acciones" />
                   <CardBody>
                     {ordersLoading ? (
                       <div className="text-sm text-zinc-500">Cargando…</div>
-                    ) : orders.length === 0 ? (
-                      <div className="text-sm text-zinc-500">No hay pedidos para este proveedor.</div>
+                    ) : visibleOrders.length === 0 ? (
+                      <div className="text-sm text-zinc-500">
+                        No hay pedidos que coincidan con los filtros.
+                      </div>
                     ) : (
                       <div className="space-y-4">
-                        {orders.map((o) => (
+                        {visibleOrders.map((o) => (
                           <div
                             key={o.id}
                             className="rounded-2xl border border-zinc-200 bg-white p-4"
@@ -1682,7 +1977,10 @@ export default function AdminSuppliersPage() {
                                   <span className="text-zinc-700">
                                     Aprox:{" "}
                                     <b>
-                                      {money(o.totals?.approxTotal ?? 0, o.totals?.currency ?? "ARS")}
+                                      {money(
+                                        o.totals?.approxTotal ?? 0,
+                                        o.totals?.currency ?? "ARS"
+                                      )}
                                     </b>
                                   </span>
                                   <span className="text-zinc-700">
@@ -1782,7 +2080,9 @@ export default function AdminSuppliersPage() {
                                         {Number(it.receivedQty ?? 0)} {it.unit || ""}
                                       </td>
                                       <td className="px-3 py-2 text-sm text-zinc-700">
-                                        {it.realUnitPrice == null ? "—" : money(it.realUnitPrice, o.totals?.currency ?? "ARS")}
+                                        {it.realUnitPrice == null
+                                          ? "—"
+                                          : money(it.realUnitPrice, o.totals?.currency ?? "ARS")}
                                       </td>
                                     </tr>
                                   ))}
@@ -1799,7 +2099,7 @@ export default function AdminSuppliersPage() {
                                       Recepción (actualiza stock)
                                     </div>
                                     <div className="text-xs text-sky-800/80">
-                                      Cargá <b>cantidad recibida</b> y/o <b>precio real</b> por ítem. No baja valores.
+                                      Cargá <b>cantidad recibida</b> y/o <b>precio real</b> por ítem.
                                     </div>
                                   </div>
                                   <Button
@@ -1860,7 +2160,9 @@ export default function AdminSuppliersPage() {
                                                   [it.ingredientId]: e.target.value,
                                                 }))
                                               }
-                                              placeholder={it.realUnitPrice == null ? "0" : String(it.realUnitPrice)}
+                                              placeholder={
+                                                it.realUnitPrice == null ? "0" : String(it.realUnitPrice)
+                                              }
                                               inputMode="decimal"
                                             />
                                           </td>

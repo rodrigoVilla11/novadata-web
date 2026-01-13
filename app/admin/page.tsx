@@ -91,7 +91,7 @@ type LinkItem = {
 };
 
 /* =============================================================================
- * UI bits (similar a Manager)
+ * UI bits
  * ========================================================================== */
 
 function toneClasses(tone: LinkItem["tone"]) {
@@ -147,24 +147,25 @@ function CardLink(item: LinkItem) {
     return (
       <div
         className={cn(
-          "rounded-2xl border bg-white p-5 opacity-60",
+          "rounded-2xl border bg-white p-4 sm:p-5 opacity-60",
           "cursor-not-allowed select-none",
           t.border
         )}
       >
         <div className="flex items-start gap-3">
-          <div className={cn("mt-0.5 rounded-xl p-2 border", t.icon)}>
+          <div className={cn("mt-0.5 rounded-xl p-2 border shrink-0", t.icon)}>
             {item.icon}
           </div>
-          <div className="min-w-0">
+
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-base font-semibold text-zinc-900">
+              <div className="text-base font-semibold text-zinc-900 truncate">
                 {item.title}
               </div>
               {showBadge && (
                 <span
                   className={cn(
-                    "rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+                    "shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold",
                     badgeClass(item.badgeTone, t.badge)
                   )}
                 >
@@ -172,7 +173,11 @@ function CardLink(item: LinkItem) {
                 </span>
               )}
             </div>
-            <div className="mt-1 text-sm text-zinc-500">{item.desc}</div>
+
+            <div className="mt-1 text-sm text-zinc-500 leading-snug">
+              {item.desc}
+            </div>
+
             <div className="mt-3 text-sm font-semibold text-zinc-500">
               No disponible
             </div>
@@ -186,43 +191,43 @@ function CardLink(item: LinkItem) {
     <Link
       href={item.href}
       className={cn(
-        "group block rounded-2xl border bg-white p-5 transition",
+        "group block rounded-2xl border bg-white p-4 sm:p-5 transition",
         "hover:-translate-y-0.5 hover:shadow-md",
         "focus:outline-none focus:ring-4",
         t.border,
         t.ring
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className={cn("mt-0.5 rounded-xl p-2 border", t.icon)}>
-            {item.icon}
+      <div className="flex items-start gap-3">
+        <div className={cn("mt-0.5 rounded-xl p-2 border shrink-0", t.icon)}>
+          {item.icon}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-base font-semibold text-zinc-900 truncate">
+              {item.title}
+            </div>
+
+            {showBadge && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+                  badgeClass(item.badgeTone, t.badge)
+                )}
+              >
+                {showCount ? item.badgeCount : item.badgeText}
+              </span>
+            )}
           </div>
 
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-base font-semibold text-zinc-900">
-                {item.title}
-              </div>
+          <div className="mt-1 text-sm text-zinc-500 leading-snug">
+            {item.desc}
+          </div>
 
-              {showBadge && (
-                <span
-                  className={cn(
-                    "rounded-full border px-2.5 py-0.5 text-xs font-semibold",
-                    badgeClass(item.badgeTone, t.badge)
-                  )}
-                >
-                  {showCount ? item.badgeCount : item.badgeText}
-                </span>
-              )}
-            </div>
-
-            <div className="mt-1 text-sm text-zinc-500">{item.desc}</div>
-
-            <div className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-zinc-800">
-              Abrir
-              <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
-            </div>
+          <div className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-zinc-800">
+            Abrir
+            <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
           </div>
         </div>
       </div>
@@ -253,6 +258,32 @@ function RolesChips({ roles }: { roles: string[] }) {
           {r}
         </span>
       ))}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  subtitle,
+  items,
+}: {
+  title: string;
+  subtitle: string;
+  items: LinkItem[];
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
+        <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {items.map((x) => (
+          <CardLink key={`${x.href}-${x.title}`} {...x} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -293,12 +324,8 @@ export default function AdminHomePage() {
     try {
       const qs = buildQS({ dateKey });
 
-      // ✅ mismo patrón que manager: paralelo
       const [a, c] = await Promise.all([
-        apiFetchAuthed<StockAlertRow[]>(
-          getAccessToken,
-          `/stock/alerts?${qs}`
-        ),
+        apiFetchAuthed<StockAlertRow[]>(getAccessToken, `/stock/alerts?${qs}`),
         apiFetchAuthed<PurchaseOrderCounts>(
           getAccessToken,
           `/purchase-orders/counts`
@@ -343,9 +370,9 @@ export default function AdminHomePage() {
   const links = useMemo<LinkItem[]>(
     () => [
       {
-        title: "Stock (Manager)",
+        title: "Stock",
         desc: "Alertas, conteos y control diario.",
-        href: "/manager/stock",
+        href: "/admin/stock",
         icon: <Package className="h-5 w-5" />,
         allow: ["ADMIN", "MANAGER"],
         tone: "manager",
@@ -354,7 +381,7 @@ export default function AdminHomePage() {
       },
       {
         title: "Órdenes de compra",
-        desc: "Pedidos a proveedores y recepción.",
+        desc: "Crear, activar/desactivar, editar y hacer pedidos a proveedores y recepción.",
         href: "/admin/suppliers",
         icon: <Truck className="h-5 w-5" />,
         allow: ["ADMIN", "MANAGER"],
@@ -371,13 +398,7 @@ export default function AdminHomePage() {
         icon: <BadgeCheck className="h-5 w-5" />,
         allow: ["ADMIN", "MANAGER"],
       },
-      {
-        title: "Proveedores",
-        desc: "Crear, activar/desactivar y editar proveedores.",
-        href: "/admin/suppliers",
-        icon: <Truck className="h-5 w-5" />,
-        allow: ["ADMIN", "MANAGER"],
-      },
+
       {
         title: "Ingredientes",
         desc: "Crear, editar y gestionar stock/umbrales.",
@@ -420,7 +441,7 @@ export default function AdminHomePage() {
         allow: ["ADMIN", "MANAGER", "CASHIER"],
       },
       {
-        title: "Órdenes (Cashier)",
+        title: "Órdenes (Caja)",
         desc: "Ver órdenes, abrir al costado y cobrar.",
         href: "/cashier/orders",
         icon: <CreditCard className="h-5 w-5" />,
@@ -459,36 +480,46 @@ export default function AdminHomePage() {
     });
   }, [links, roles]);
 
-  const topLinks = visible.filter((l) =>
-    ["/admin/stock", "/admin/suppliers"].includes(l.href)
+
+  const opLinks = useMemo(
+    () =>
+      visible.filter((l) =>
+        [
+          "/admin/attendance",
+          "/admin/suppliers",
+          "/admin/ingredients",
+          "/admin/tasks",
+          "/admin/employees",
+        ].includes(l.href)
+      ),
+    [visible]
   );
 
-  const opLinks = visible.filter((l) =>
-    [
-      "/admin/attendance",
-      "/admin/suppliers",
-      "/admin/ingredients",
-      "/admin/tasks",
-      "/admin/employees",
-    ].includes(l.href)
+  const managerLinks = useMemo(
+    () => visible.filter((l) => l.href.startsWith("/manager/")),
+    [visible]
   );
-
-  const managerLinks = visible.filter((l) => l.href.startsWith("/manager/"));
-  const cashierLinks = visible.filter((l) => l.href.startsWith("/cashier/"));
-  const adminLinks = visible.filter(
-    (l) => l.href.startsWith("/admin/") && l.tone === "admin"
+  const cashierLinks = useMemo(
+    () => visible.filter((l) => l.href.startsWith("/cashier/")),
+    [visible]
+  );
+  const adminLinks = useMemo(
+    () => visible.filter((l) => l.href.startsWith("/admin/") && l.tone === "admin"),
+    [visible]
   );
 
   return (
     <div className="space-y-6 md:space-y-8">
-      {/* Header (como manager) */}
-      <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-zinc-900">
+      {/* Header */}
+      <div className="rounded-3xl border border-zinc-200 bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          {/* Left */}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-bold text-zinc-900">
                 Panel de control
               </h1>
+
               <span
                 className={cn(
                   "rounded-full px-2 py-0.5 text-xs font-semibold border",
@@ -499,13 +530,10 @@ export default function AdminHomePage() {
                     : "bg-red-50 text-red-700 border-red-200"
                 )}
               >
-                {loading
-                  ? "Cargando..."
-                  : overallOk
-                  ? "Todo OK"
-                  : "Requiere atención"}
+                {loading ? "Cargando..." : overallOk ? "Todo OK" : "Requiere atención"}
               </span>
             </div>
+
             <p className="mt-1 text-sm text-zinc-500">
               Accesos rápidos + alertas operativas (stock y compras).
             </p>
@@ -513,24 +541,25 @@ export default function AdminHomePage() {
             <RolesChips roles={roles} />
           </div>
 
-          <div className="flex items-end gap-2">
-            <div className="hidden md:block">
+          {/* Right */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-end">
+            {/* Fecha (mobile + desktop) */}
+            <div className="w-full sm:w-auto">
               <label className="mb-1 block text-xs font-semibold text-zinc-600">
                 Fecha
               </label>
-              <div className="flex items-center gap-2">
-                <div className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2">
-                  <CalendarDays className="h-4 w-4 text-zinc-500" />
-                  <input
-                    type="date"
-                    value={dateKey}
-                    onChange={(e) => setDateKey(e.target.value)}
-                    className="bg-transparent text-sm outline-none"
-                  />
-                </div>
+              <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2">
+                <CalendarDays className="h-4 w-4 text-zinc-500" />
+                <input
+                  type="date"
+                  value={dateKey}
+                  onChange={(e) => setDateKey(e.target.value)}
+                  className="w-full bg-transparent text-sm outline-none"
+                />
               </div>
             </div>
 
+            {/* Recargar */}
             <button
               onClick={async () => {
                 setBusy(true);
@@ -538,31 +567,37 @@ export default function AdminHomePage() {
                 setBusy(false);
               }}
               className={cn(
-                "inline-flex items-center justify-center rounded-2xl border px-3 py-2",
+                "inline-flex w-full sm:w-auto items-center justify-center rounded-2xl border px-3 py-2",
                 "border-zinc-200 bg-white hover:bg-zinc-50",
                 "focus:outline-none focus:ring-4 focus:ring-emerald-100"
               )}
               title="Recargar"
             >
-              <RefreshCcw
-                className={cn("h-4 w-4", busy ? "animate-spin" : "")}
-              />
+              <RefreshCcw className={cn("h-4 w-4", busy ? "animate-spin" : "")} />
+              <span className="ml-2 text-sm font-semibold sm:hidden">Recargar</span>
             </button>
           </div>
         </div>
 
+        {busy ? (
+          <div className="mt-3 text-xs text-zinc-500 flex items-center gap-2">
+            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
+            Actualizando datos…
+          </div>
+        ) : null}
+
         {error && (
-          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* CTA contextual (como antes, pero estilo manager) */}
-        <div className="mt-5 flex flex-wrap gap-2">
+        {/* CTA contextual */}
+        <div className="mt-5 flex flex-col sm:flex-row flex-wrap gap-2">
           {isAdmin ? (
             <Link
               href="/admin/users"
-              className="inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
             >
               <Shield className="h-4 w-4" />
               Usuarios & Roles
@@ -571,7 +606,7 @@ export default function AdminHomePage() {
           ) : isCashier ? (
             <Link
               href="/cashier/orders"
-              className="inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
             >
               <CreditCard className="h-4 w-4" />
               Ir a cobros
@@ -580,7 +615,7 @@ export default function AdminHomePage() {
           ) : isManager ? (
             <Link
               href="/manager/weekly"
-              className="inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
             >
               <ListChecks className="h-4 w-4" />
               Abrir Weekly
@@ -590,8 +625,9 @@ export default function AdminHomePage() {
         </div>
       </div>
 
-      {/* Cards resumen (como manager) */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      {/* Cards resumen */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {/* Stock */}
         <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-zinc-900">Stock</div>
@@ -601,13 +637,15 @@ export default function AdminHomePage() {
               <CheckCircle2 className="h-5 w-5 text-emerald-600" />
             )}
           </div>
+
           <div className="mt-2 text-3xl font-bold">{stats.low}</div>
           <p className="text-sm text-zinc-600">
             Bajo mínimo • Sin conteo: <b>{stats.noCount}</b>
           </p>
+
           <Link
             href="/admin/stock"
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
           >
             <Package className="h-4 w-4" />
             Ir a Stock
@@ -615,6 +653,7 @@ export default function AdminHomePage() {
           </Link>
         </div>
 
+        {/* Órdenes de compra */}
         <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-zinc-900">
@@ -626,11 +665,13 @@ export default function AdminHomePage() {
               <CheckCircle2 className="h-5 w-5 text-emerald-600" />
             )}
           </div>
+
           <div className="mt-2 text-3xl font-bold">{stats.poPending}</div>
           <p className="text-sm text-zinc-600">Pendientes (abiertas)</p>
+
           <Link
             href="/admin/suppliers"
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#144336] px-4 py-2 text-sm font-semibold text-white hover:bg-[#10362b] focus:outline-none focus:ring-4 focus:ring-emerald-100"
           >
             <Truck className="h-4 w-4" />
             Ver proveedores
@@ -638,18 +679,20 @@ export default function AdminHomePage() {
           </Link>
         </div>
 
-        <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <div className="text-sm font-semibold text-zinc-900">
-            Accesos rápidos
-          </div>
-          <div className="mt-4 flex flex-col gap-2">
+        {/* Accesos rápidos */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:col-span-2 xl:col-span-1">
+          <div className="text-sm font-semibold text-zinc-900">Accesos rápidos</div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
             {isCashier && (
               <Link
                 href="/cashier/orders"
-                className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+                className="inline-flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100"
               >
-                <CreditCard className="h-4 w-4" />
-                Cobros
+                <span className="inline-flex items-center gap-2">
+                  <CreditCard className="h-4 w-4" />
+                  Cobros
+                </span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             )}
@@ -657,10 +700,12 @@ export default function AdminHomePage() {
             {(isAdmin || isManager) && (
               <Link
                 href="/manager/weekly"
-                className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-900 hover:bg-sky-100"
+                className="inline-flex items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-900 hover:bg-sky-100"
               >
-                <ListChecks className="h-4 w-4" />
-                Weekly
+                <span className="inline-flex items-center gap-2">
+                  <ListChecks className="h-4 w-4" />
+                  Weekly
+                </span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             )}
@@ -668,10 +713,12 @@ export default function AdminHomePage() {
             {isAdmin && (
               <Link
                 href="/admin/users"
-                className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100"
+                className="inline-flex items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100"
               >
-                <Shield className="h-4 w-4" />
-                Usuarios
+                <span className="inline-flex items-center gap-2">
+                  <Shield className="h-4 w-4" />
+                  Usuarios
+                </span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             )}
@@ -679,95 +726,32 @@ export default function AdminHomePage() {
         </div>
       </div>
 
-      {/* Links (estilo cards como antes, pero con badges) */}
+      {/* Links */}
       <div className="space-y-6">
-        {topLinks.length > 0 && (
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900">
-                Alertas & Control
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Entrá directo a lo que requiere atención.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {topLinks.map((x) => (
-                <CardLink key={x.href} {...x} />
-              ))}
-            </div>
-          </div>
-        )}
 
-        {opLinks.length > 0 && (
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900">
-                Operación diaria
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Lo más usado para gestionar el día a día.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {opLinks.map((x) => (
-                <CardLink key={x.href} {...x} />
-              ))}
-            </div>
-          </div>
-        )}
+        <Section
+          title="Operación diaria"
+          subtitle="Lo más usado para gestionar el día a día."
+          items={opLinks}
+        />
 
-        {cashierLinks.length > 0 && (
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900">
-                Caja / POS
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Ventas, órdenes y cobros (en el día).
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {cashierLinks.map((x) => (
-                <CardLink key={x.href} {...x} />
-              ))}
-            </div>
-          </div>
-        )}
+        <Section
+          title="Caja / POS"
+          subtitle="Ventas, órdenes y cobros (en el día)."
+          items={cashierLinks}
+        />
 
-        {managerLinks.length > 0 && (
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900">Gestión</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Paneles para seguimiento y control.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {managerLinks.map((x) => (
-                <CardLink key={x.href} {...x} />
-              ))}
-            </div>
-          </div>
-        )}
+        <Section
+          title="Gestión"
+          subtitle="Paneles para seguimiento y control."
+          items={managerLinks}
+        />
 
-        {adminLinks.length > 0 && (
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900">
-                Administración
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Solo ADMIN: usuarios, roles y configuración.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {adminLinks.map((x) => (
-                <CardLink key={x.href} {...x} />
-              ))}
-            </div>
-          </div>
-        )}
+        <Section
+          title="Administración"
+          subtitle="Solo ADMIN: usuarios, roles y configuración."
+          items={adminLinks}
+        />
       </div>
     </div>
   );

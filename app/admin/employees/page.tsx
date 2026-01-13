@@ -5,7 +5,6 @@ import { AdminProtected } from "@/components/AdminProtected";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { apiFetchAuthed } from "@/lib/apiAuthed";
 import { Button } from "@/components/ui/Button";
-import { Card, CardBody } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 import {
   RefreshCcw,
@@ -23,14 +22,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   Filter,
-  ChevronUp,
-  ChevronDown,
-  Info,
 } from "lucide-react";
 
 type EmployeeRow = {
   id: string;
-  branchId?: string | null; // ✅ NUEVO (backend multi-branch)
+  branchId?: string | null;
   fullName: string;
   hireDate: string; // ISO
   hourlyRate: number;
@@ -42,7 +38,7 @@ type EmployeeRow = {
 
 type UserRow = {
   id: string;
-  branchId?: string | null; // ✅ opcional si lo devolvés en /admin/users
+  branchId?: string | null;
   email: string;
   roles: string[];
   isActive: boolean;
@@ -116,6 +112,75 @@ function money(n: number) {
   return n.toLocaleString("es-AR");
 }
 
+/* =============================================================================
+ * Drawer (simple)
+ * ============================================================================= */
+
+function Drawer({
+  open,
+  onClose,
+  title,
+  subtitle,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  return (
+    <>
+      <div
+        className={cn(
+          "fixed inset-0 z-40 bg-black/40 transition-opacity",
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        )}
+        onMouseDown={onClose}
+      />
+
+      <div
+        className={cn(
+          "fixed right-0 top-0 z-50 h-full w-full max-w-md transform border-l border-zinc-200 bg-white shadow-2xl transition-transform",
+          open ? "translate-x-0" : "translate-x-full"
+        )}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-start justify-between gap-3 border-b border-zinc-100 p-5">
+            <div>
+              <div className="text-lg font-semibold text-zinc-900">{title}</div>
+              {subtitle ? (
+                <div className="mt-1 text-sm text-zinc-500">{subtitle}</div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-zinc-200 bg-white p-2 text-zinc-700 hover:bg-zinc-50"
+              title="Cerrar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-auto p-5">{children}</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function AdminEmployeesPage() {
   const { getAccessToken } = useAuth();
 
@@ -131,20 +196,24 @@ export default function AdminEmployeesPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  // create form
-  const [createOpen, setCreateOpen] = useState(true);
+  // drawer create
+  const [createOpen, setCreateOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [hireDate, setHireDate] = useState(todayKeyArgentina());
   const [hourlyRate, setHourlyRate] = useState<number>(0);
   const [newUserId, setNewUserId] = useState<string>("");
 
-  // edit inline
+  const createNameRef = useRef<HTMLInputElement | null>(null);
+
+  // drawer edit
+  const [editOpen, setEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFullName, setEditFullName] = useState("");
   const [editHireDate, setEditHireDate] = useState("");
   const [editHourlyRate, setEditHourlyRate] = useState<number>(0);
+  const editNameRef = useRef<HTMLInputElement | null>(null);
 
-  // link drafts (employeeId -> selectedUserId)
+  // link drafts
   const [linkDraft, setLinkDraft] = useState<Record<string, string>>({});
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -195,7 +264,6 @@ export default function AdminEmployeesPage() {
     setOkMsg(null);
     setLoadingList(true);
     try {
-      // ✅ opcional: pedir solo activos al backend si querés
       const qs = onlyActive ? "?activeOnly=true" : "";
 
       const [emps, us] = await Promise.all([
@@ -213,9 +281,6 @@ export default function AdminEmployeesPage() {
         }
         return next;
       });
-
-      // ✅ si querés, no flashes en el primer load (a gusto)
-      // flashOk("Datos actualizados ✔");
     } catch (e: any) {
       setError(e?.message || "Error cargando empleados/usuarios");
     } finally {
@@ -226,7 +291,28 @@ export default function AdminEmployeesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onlyActive]); // ✅ recarga si cambiás filtro server-side
+  }, [onlyActive]);
+
+  // foco al abrir drawer create
+  useEffect(() => {
+    if (!createOpen) return;
+    const t = window.setTimeout(() => createNameRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [createOpen]);
+
+  // foco al abrir drawer edit
+  useEffect(() => {
+    if (!editOpen) return;
+    const t = window.setTimeout(() => editNameRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [editOpen]);
+
+  function resetCreateForm() {
+    setFullName("");
+    setHireDate(todayKeyArgentina());
+    setHourlyRate(0);
+    setNewUserId("");
+  }
 
   async function createEmployee() {
     if (!fullName.trim() || !hireDate.trim()) return;
@@ -239,6 +325,7 @@ export default function AdminEmployeesPage() {
     setError(null);
     setOkMsg(null);
     setBusy(true);
+
     try {
       await apiFetchAuthed(getAccessToken, "/employees", {
         method: "POST",
@@ -250,13 +337,12 @@ export default function AdminEmployeesPage() {
         }),
       });
 
-      setFullName("");
-      setHireDate(todayKeyArgentina());
-      setHourlyRate(0);
-      setNewUserId("");
+      resetCreateForm();
+      setCreateOpen(false);
 
       flashOk("Empleado creado ✔");
       await load();
+      searchRef.current?.focus();
     } catch (e: any) {
       setError(e?.message || "Error creando empleado");
     } finally {
@@ -264,28 +350,32 @@ export default function AdminEmployeesPage() {
     }
   }
 
-  function startEdit(e: EmployeeRow) {
+  function openEditDrawer(e: EmployeeRow) {
     setEditingId(e.id);
     setEditFullName(e.fullName);
     setEditHireDate(e.hireDate?.slice(0, 10) || todayKeyArgentina());
     setEditHourlyRate(e.hourlyRate || 0);
+    setEditOpen(true);
   }
 
-  function cancelEdit() {
+  function closeEditDrawer() {
+    if (busy) return;
+    setEditOpen(false);
     setEditingId(null);
     setEditFullName("");
     setEditHireDate("");
     setEditHourlyRate(0);
   }
 
-  async function saveEdit(id: string) {
+  async function saveEdit() {
+    if (!editingId) return;
     if (!editFullName.trim() || !editHireDate.trim()) return;
 
     setError(null);
     setOkMsg(null);
     setBusy(true);
     try {
-      await apiFetchAuthed(getAccessToken, `/employees/${id}`, {
+      await apiFetchAuthed(getAccessToken, `/employees/${editingId}`, {
         method: "PATCH",
         body: JSON.stringify({
           fullName: editFullName.trim(),
@@ -294,8 +384,8 @@ export default function AdminEmployeesPage() {
         }),
       });
 
-      cancelEdit();
       flashOk("Empleado actualizado ✔");
+      closeEditDrawer();
       await load();
     } catch (e: any) {
       setError(e?.message || "Error actualizando empleado");
@@ -387,6 +477,11 @@ export default function AdminEmployeesPage() {
     }
   }
 
+  const editingEmployee = useMemo(
+    () => (editingId ? items.find((x) => x.id === editingId) : null),
+    [editingId, items]
+  );
+
   return (
     <AdminProtected>
       <div className="space-y-6">
@@ -415,11 +510,19 @@ export default function AdminEmployeesPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button onClick={() => setCreateOpen(true)} disabled={busy}>
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Nuevo empleado
+                </span>
+              </Button>
+
               <Button
                 variant="secondary"
                 onClick={load}
                 disabled={busy}
                 loading={loadingList}
+                title="Actualizar"
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
@@ -452,6 +555,7 @@ export default function AdminEmployeesPage() {
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <Input
+                ref={searchRef}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Buscar por nombre…"
@@ -477,171 +581,12 @@ export default function AdminEmployeesPage() {
           </div>
         </div>
 
-        {/* Create employee */}
-        <Card>
-          <button
-            type="button"
-            onClick={() => setCreateOpen((v) => !v)}
-            className={cn(
-              "w-full text-left",
-              "flex items-start justify-between gap-4 px-5 pt-5",
-              "rounded-2xl",
-              "hover:bg-zinc-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
-            )}
-          >
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="text-base font-semibold text-zinc-900">
-                  Crear empleado
-                </div>
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-                    createOpen
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-zinc-200 bg-white text-zinc-600"
-                  )}
-                >
-                  {createOpen ? "Abierto" : "Cerrado"}
-                </span>
-              </div>
-
-              <div className="mt-1 text-sm text-zinc-500">
-                Alta de empleado y vínculo opcional con usuario.
-              </div>
-            </div>
-
-            <div
-              className={cn(
-                "shrink-0",
-                "inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold",
-                "border-zinc-200 text-zinc-800 hover:bg-zinc-50"
-              )}
-              aria-hidden="true"
-            >
-              {createOpen ? (
-                <>
-                  <ChevronUp className="h-4 w-4" />
-                  Ocultar
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-4 w-4" />
-                  Mostrar
-                </>
-              )}
-            </div>
-          </button>
-
-          <div
-            className={cn(
-              "overflow-hidden transition-[max-height,opacity] duration-300 ease-out",
-              createOpen ? "max-h-[520px] opacity-100" : "max-h-0 opacity-0"
-            )}
-          >
-            <CardBody>
-              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
-                <div className="flex items-start gap-2">
-                  <Info className="mt-0.5 h-4 w-4 text-zinc-400" />
-                  <div>
-                    Completá <b>Nombre</b> y <b>Fecha ingreso</b>. El usuario es
-                    opcional.
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-12">
-                <div className="md:col-span-5">
-                  <Field label="Nombre">
-                    <div className="relative">
-                      <UserIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <Input
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Ej: Juan Pérez"
-                        className="pl-9"
-                      />
-                    </div>
-                  </Field>
-                </div>
-
-                <div className="md:col-span-3">
-                  <Field label="Fecha ingreso">
-                    <div className="relative">
-                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <Input
-                        type="date"
-                        value={hireDate}
-                        onChange={(e) => setHireDate(e.target.value)}
-                        className="pl-9"
-                      />
-                    </div>
-                  </Field>
-                </div>
-
-                <div className="md:col-span-2">
-                  <Field label="Pago por hora">
-                    <div className="relative">
-                      <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <Input
-                        type="number"
-                        value={String(hourlyRate)}
-                        onChange={(e) => setHourlyRate(Number(e.target.value))}
-                        className="pl-9"
-                        inputMode="numeric"
-                        min={0}
-                      />
-                    </div>
-                    <div className="mt-1 text-xs text-zinc-500">
-                      Vista:{" "}
-                      <span className="font-semibold text-zinc-700">
-                        {money(hourlyRate)}
-                      </span>
-                    </div>
-                  </Field>
-                </div>
-
-                <div className="md:col-span-2 flex items-end">
-                  <Button
-                    className="w-full"
-                    onClick={createEmployee}
-                    disabled={busy || !fullName.trim() || !hireDate.trim()}
-                    loading={busy}
-                  >
-                    <span className="inline-flex items-center gap-2 text-black">
-                      <Plus className="h-4 w-4" />
-                      Crear
-                    </span>
-                  </Button>
-                </div>
-
-                <div className="md:col-span-6">
-                  <Field label="Usuario (opcional)">
-                    <Select
-                      value={newUserId}
-                      onChange={(e) => setNewUserId(e.target.value)}
-                      disabled={busy}
-                    >
-                      <option value="">— Sin usuario —</option>
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {userLabel(u)}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-              </div>
-            </CardBody>
-          </div>
-        </Card>
-
         {/* List */}
         <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
           <div className="border-b border-zinc-100 px-5 py-4">
             <h2 className="text-lg font-semibold text-zinc-900">Listado</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Editá inline, activá/desactivá y vinculá usuarios.
+              Editá en drawer, activá/desactivá y vinculá usuarios.
             </p>
           </div>
 
@@ -689,79 +634,50 @@ export default function AdminEmployeesPage() {
 
                 {!loadingList &&
                   filtered.map((e) => {
-                    const isEditing = editingId === e.id;
-
                     const currentUserId = e.userId ?? "";
                     const draft = linkDraft[e.id] ?? currentUserId;
                     const currentUser = currentUserId
                       ? usersById.get(currentUserId)
                       : null;
-
                     const draftDiffers = draft !== (currentUserId || "");
 
                     return (
                       <tr key={e.id} className="hover:bg-zinc-50/60">
                         <td className="px-4 py-3">
-                          {isEditing ? (
-                            <Input
-                              value={editFullName}
-                              onChange={(ev) => setEditFullName(ev.target.value)}
-                            />
-                          ) : (
-                            <div>
-                              <div className="text-sm font-semibold text-zinc-900">
-                                {e.fullName}
-                              </div>
-                              <div className="mt-1 text-xs text-zinc-500">
-                                ID:{" "}
-                                <button
-                                  type="button"
-                                  className="underline decoration-zinc-300 hover:decoration-zinc-500"
-                                  onClick={() => copyText(e.id)}
-                                >
-                                  copiar
-                                </button>
-                              </div>
+                          <div>
+                            <div className="text-sm font-semibold text-zinc-900">
+                              {e.fullName}
                             </div>
-                          )}
+                            <div className="mt-1 text-xs text-zinc-500">
+                              ID:{" "}
+                              <button
+                                type="button"
+                                className="underline decoration-zinc-300 hover:decoration-zinc-500"
+                                onClick={() => copyText(e.id)}
+                              >
+                                copiar
+                              </button>
+                            </div>
+                          </div>
                         </td>
 
                         <td className="px-4 py-3">
-                          {isEditing ? (
-                            <Input
-                              type="date"
-                              value={editHireDate}
-                              onChange={(ev) => setEditHireDate(ev.target.value)}
-                            />
-                          ) : (
-                            <div className="text-sm text-zinc-700">
-                              {e.hireDate?.slice(0, 10)}
-                            </div>
-                          )}
+                          <div className="text-sm text-zinc-700">
+                            {e.hireDate?.slice(0, 10)}
+                          </div>
                         </td>
 
                         <td className="px-4 py-3">
-                          {isEditing ? (
-                            <Input
-                              type="number"
-                              value={String(editHourlyRate)}
-                              onChange={(ev) =>
-                                setEditHourlyRate(Number(ev.target.value))
-                              }
-                              inputMode="numeric"
-                            />
-                          ) : (
-                            <div className="text-sm text-zinc-700">
-                              {money(e.hourlyRate)}
-                            </div>
-                          )}
+                          <div className="text-sm text-zinc-700">
+                            {money(e.hourlyRate)}
+                          </div>
                         </td>
 
                         <td className="px-4 py-3">
                           <div className="grid gap-2">
                             <Select
                               value={draft}
-                              disabled={busy || isEditing}
+                              disabled={busy || editOpen} // si está editando en drawer, bloqueamos vínculo
                               onChange={(ev) =>
                                 setLinkDraft((p) => ({
                                   ...p,
@@ -777,27 +693,25 @@ export default function AdminEmployeesPage() {
                               ))}
                             </Select>
 
-                            {!isEditing && (
-                              <div className="text-xs text-zinc-500">
-                                {currentUser ? (
-                                  <span>
-                                    Actual:{" "}
-                                    <span className="font-medium text-zinc-700">
-                                      {currentUser.email}
-                                    </span>
+                            <div className="text-xs text-zinc-500">
+                              {currentUser ? (
+                                <span>
+                                  Actual:{" "}
+                                  <span className="font-medium text-zinc-700">
+                                    {currentUser.email}
                                   </span>
-                                ) : currentUserId ? (
-                                  <span>Actual: {currentUserId}</span>
-                                ) : (
-                                  <span>Sin vínculo</span>
-                                )}
-                              </div>
-                            )}
+                                </span>
+                              ) : currentUserId ? (
+                                <span>Actual: {currentUserId}</span>
+                              ) : (
+                                <span>Sin vínculo</span>
+                              )}
+                            </div>
 
                             <div className="flex flex-wrap gap-2">
                               <Button
                                 variant="secondary"
-                                disabled={busy || isEditing || !draftDiffers}
+                                disabled={busy || editOpen || !draftDiffers}
                                 onClick={() => saveLink(e.id)}
                               >
                                 <span className="inline-flex items-center gap-2">
@@ -808,7 +722,7 @@ export default function AdminEmployeesPage() {
 
                               <Button
                                 variant="secondary"
-                                disabled={busy || isEditing || !currentUserId}
+                                disabled={busy || editOpen || !currentUserId}
                                 onClick={() => unlink(e.id)}
                               >
                                 <span className="inline-flex items-center gap-2">
@@ -826,59 +740,27 @@ export default function AdminEmployeesPage() {
 
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            {!isEditing ? (
-                              <>
-                                <Button
-                                  variant="secondary"
-                                  disabled={busy}
-                                  onClick={() => startEdit(e)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Pencil className="h-4 w-4" />
-                                    Editar
-                                  </span>
-                                </Button>
+                            <Button
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => openEditDrawer(e)}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Pencil className="h-4 w-4" />
+                                Editar
+                              </span>
+                            </Button>
 
-                                <Button
-                                  variant={e.isActive ? "danger" : "secondary"}
-                                  disabled={busy}
-                                  onClick={() => toggleActive(e)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Power className="h-4 w-4" />
-                                    {e.isActive ? "Desactivar" : "Reactivar"}
-                                  </span>
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Button
-                                  variant="secondary"
-                                  disabled={busy}
-                                  onClick={cancelEdit}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <X className="h-4 w-4" />
-                                    Cancelar
-                                  </span>
-                                </Button>
-
-                                <Button
-                                  disabled={
-                                    busy ||
-                                    !editFullName.trim() ||
-                                    !editHireDate.trim()
-                                  }
-                                  loading={busy}
-                                  onClick={() => saveEdit(e.id)}
-                                >
-                                  <span className="inline-flex items-center gap-2">
-                                    <Save className="h-4 w-4" />
-                                    Guardar
-                                  </span>
-                                </Button>
-                              </>
-                            )}
+                            <Button
+                              variant={e.isActive ? "danger" : "secondary"}
+                              disabled={busy}
+                              onClick={() => toggleActive(e)}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Power className="h-4 w-4" />
+                                {e.isActive ? "Desactivar" : "Reactivar"}
+                              </span>
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -893,6 +775,211 @@ export default function AdminEmployeesPage() {
           Tip: ya estás protegido en backend para que no se pueda asignar un user
           de otra sucursal.
         </div>
+
+        {/* Drawer Create */}
+        <Drawer
+          open={createOpen}
+          onClose={() => {
+            if (busy) return;
+            setCreateOpen(false);
+          }}
+          title="Nuevo empleado"
+          subtitle="Alta de empleado y vínculo opcional con usuario."
+        >
+          <div className="space-y-4">
+            <Field label="Nombre">
+              <div className="relative">
+                <UserIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  ref={createNameRef}
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Ej: Juan Pérez"
+                  className="pl-9"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createEmployee();
+                  }}
+                />
+              </div>
+            </Field>
+
+            <Field label="Fecha ingreso">
+              <div className="relative">
+                <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  type="date"
+                  value={hireDate}
+                  onChange={(e) => setHireDate(e.target.value)}
+                  className="pl-9"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createEmployee();
+                  }}
+                />
+              </div>
+            </Field>
+
+            <Field label="Pago por hora">
+              <div className="relative">
+                <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  type="number"
+                  value={String(hourlyRate)}
+                  onChange={(e) => setHourlyRate(Number(e.target.value))}
+                  className="pl-9"
+                  inputMode="numeric"
+                  min={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createEmployee();
+                  }}
+                />
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Vista:{" "}
+                <span className="font-semibold text-zinc-700">
+                  {money(hourlyRate)}
+                </span>
+              </div>
+            </Field>
+
+            <Field label="Usuario (opcional)">
+              <Select
+                value={newUserId}
+                onChange={(e) => setNewUserId(e.target.value)}
+                disabled={busy}
+              >
+                <option value="">— Sin usuario —</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {userLabel(u)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button
+                onClick={createEmployee}
+                disabled={busy || !fullName.trim() || !hireDate.trim()}
+                loading={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Crear
+                </span>
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  resetCreateForm();
+                  setError(null);
+                  setOkMsg(null);
+                  setCreateOpen(false);
+                }}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </Drawer>
+
+        {/* Drawer Edit */}
+        <Drawer
+          open={editOpen}
+          onClose={closeEditDrawer}
+          title="Editar empleado"
+          subtitle={
+            editingEmployee
+              ? `Editando: ${editingEmployee.fullName} • ID ${editingEmployee.id}`
+              : "Editar datos del empleado."
+          }
+        >
+          <div className="space-y-4">
+            <Field label="Nombre">
+              <div className="relative">
+                <UserIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  ref={editNameRef}
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  placeholder="Ej: Juan Pérez"
+                  className="pl-9"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveEdit();
+                  }}
+                  disabled={busy}
+                />
+              </div>
+            </Field>
+
+            <Field label="Fecha ingreso">
+              <div className="relative">
+                <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  type="date"
+                  value={editHireDate}
+                  onChange={(e) => setEditHireDate(e.target.value)}
+                  className="pl-9"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveEdit();
+                  }}
+                  disabled={busy}
+                />
+              </div>
+            </Field>
+
+            <Field label="Pago por hora">
+              <div className="relative">
+                <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  type="number"
+                  value={String(editHourlyRate)}
+                  onChange={(e) => setEditHourlyRate(Number(e.target.value))}
+                  className="pl-9"
+                  inputMode="numeric"
+                  min={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveEdit();
+                  }}
+                  disabled={busy}
+                />
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Vista:{" "}
+                <span className="font-semibold text-zinc-700">
+                  {money(editHourlyRate)}
+                </span>
+              </div>
+            </Field>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button
+                onClick={saveEdit}
+                disabled={
+                  busy ||
+                  !editingId ||
+                  !editFullName.trim() ||
+                  !editHireDate.trim()
+                }
+                loading={busy}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Save className="h-4 w-4" />
+                  Guardar cambios
+                </span>
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={closeEditDrawer}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </Drawer>
       </div>
     </AdminProtected>
   );

@@ -1,5 +1,5 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "./providers/AuthProvider";
 import { ReduxProvider } from "./providers/ReduxProvider";
 
@@ -16,6 +16,9 @@ export const metadata: Metadata = {
     shortcut: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
+};
+
+export const viewport: Viewport = {
   themeColor: "#144336",
 };
 
