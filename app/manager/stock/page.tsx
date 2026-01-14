@@ -122,8 +122,8 @@ type IngredientRow = {
 type ManualMode = "IN" | "OUT" | "ADJUST";
 
 /** OJO: names deben coincidir con tus enums en backend */
-type StockMovementType = "IN" | "OUT" | "ADJUST"; // si tu enum es otro, cambiá acá
-type StockMovementReason = "MANUAL" | "PURCHASE" | "WASTE" | "ADJUSTMENT"; // idem
+type StockMovementType = "IN" | "OUT" | "ADJUST";
+type StockMovementReason = "MANUAL" | "PURCHASE" | "WASTE" | "ADJUSTMENT";
 
 type StockMovementRow = {
   id: string;
@@ -161,6 +161,85 @@ function StockPill({ onHand, minQty }: { onHand: number; minQty: number }) {
     >
       {low ? "BAJO" : "OK"}
     </span>
+  );
+}
+
+/* =============================================================================
+ * Selection Bar (sticky acciones cuando hay selección)
+ * ========================================================================== */
+function SelectionBar({
+  selectedCount,
+  suppliersCount,
+  busy,
+  onCreatePO,
+  onCreatePOBySupplier,
+  onSelectVisible,
+  onSelectLowVisible,
+  onClear,
+}: {
+  selectedCount: number;
+  suppliersCount: number;
+  busy: boolean;
+  onCreatePO: () => void;
+  onCreatePOBySupplier: () => void;
+  onSelectVisible: () => void;
+  onSelectLowVisible: () => void;
+  onClear: () => void;
+}) {
+  if (!selectedCount) return null;
+
+  return (
+    <div className="fixed bottom-4 left-1/2 z-40 w-[min(980px,92vw)] -translate-x-1/2">
+      <div className="rounded-2xl border border-zinc-200 bg-white/90 backdrop-blur shadow-lg px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-zinc-700">
+            Seleccionados: <b className="text-zinc-900">{selectedCount}</b>
+            {suppliersCount > 1 && (
+              <span className="ml-2 text-xs text-zinc-500">
+                ({suppliersCount} proveedores)
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={onSelectVisible} disabled={busy}>
+              Seleccionar visibles
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={onSelectLowVisible}
+              disabled={busy}
+              title="Marca selección solo en los visibles cuyo stock está bajo minQty"
+            >
+              Seleccionar bajos
+            </Button>
+
+            {suppliersCount > 1 ? (
+              <Button onClick={onCreatePOBySupplier} disabled={busy}>
+                <span className="inline-flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4" />
+                  Crear pedidos
+                </span>
+              </Button>
+            ) : (
+              <Button onClick={onCreatePO} disabled={busy}>
+                <span className="inline-flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4" />
+                  Crear pedido
+                </span>
+              </Button>
+            )}
+
+            <Button variant="secondary" onClick={onClear} disabled={busy}>
+              <span className="inline-flex items-center gap-2">
+                <X className="h-4 w-4" />
+                Limpiar
+              </span>
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -211,7 +290,7 @@ function MovementsModal({
   if (!open || !ingredient) return null;
 
   return (
-    <div className="fixed inset-0 z-75">
+    <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-1/2 top-10 w-[min(980px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
@@ -423,7 +502,7 @@ function ManualMoveModal({
   }
 
   return (
-    <div className="fixed inset-0 z-80">
+    <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-1/2 top-10 w-[min(900px,92vw)] -translate-x-1/2 rounded-3xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
@@ -457,10 +536,7 @@ function ManualMoveModal({
 
           <div className="grid gap-3 md:grid-cols-4">
             <Field label="Tipo">
-              <Select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as any)}
-              >
+              <Select value={mode} onChange={(e) => setMode(e.target.value as any)}>
                 <option value="IN">Entrada (IN)</option>
                 <option value="OUT">Salida (OUT)</option>
                 <option value="ADJUST">Ajuste (+/-)</option>
@@ -488,9 +564,7 @@ function ManualMoveModal({
             </Field>
 
             <Field
-              label={`Cantidad (${
-                mode === "ADJUST" ? "+/-" : "valor absoluto"
-              })`}
+              label={`Cantidad (${mode === "ADJUST" ? "+/-" : "valor absoluto"})`}
             >
               <Input
                 value={qty}
@@ -528,40 +602,169 @@ function ManualMoveModal({
 }
 
 /* =============================================================================
- * Create PO drawer
+ * Drawer de Pedido (single + multi proveedor)
  * ========================================================================== */
+function LinesEditor({
+  lines,
+  busy,
+  onChangeQty,
+}: {
+  lines: Array<{ ingredientId: string; label: string; qty: number }>;
+  busy: boolean;
+  onChangeQty: (ingredientId: string, next: number) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-200 overflow-hidden">
+      <div className="border-b px-4 py-3 text-sm font-semibold text-zinc-900 flex items-center justify-between">
+        <span>Ítems ({lines.length})</span>
+        <span className="text-xs font-normal text-zinc-500">Editá cantidades</span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full">
+          <thead className="bg-zinc-50">
+            <tr>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                Ingrediente
+              </th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
+                Cantidad
+              </th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y">
+            {lines.length === 0 && (
+              <tr>
+                <td colSpan={2} className="px-4 py-8 text-sm text-zinc-500">
+                  No hay ítems.
+                </td>
+              </tr>
+            )}
+
+            {lines.map((l) => (
+              <tr key={l.ingredientId}>
+                <td className="px-4 py-2 text-sm">
+                  <div className="font-semibold text-zinc-900">{l.label}</div>
+                  <div className="text-xs text-zinc-500">
+                    {l.ingredientId.slice(-6)}
+                  </div>
+                </td>
+
+                <td className="px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => onChangeQty(l.ingredientId, num(l.qty) - 1)}
+                      title="-1"
+                    >
+                      −
+                    </Button>
+
+                    <Input
+                      value={String(l.qty ?? 0)}
+                      onChange={(e) =>
+                        onChangeQty(l.ingredientId, Number(e.target.value))
+                      }
+                      inputMode="decimal"
+                      className="w-28"
+                      placeholder="0"
+                    />
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => onChangeQty(l.ingredientId, num(l.qty) + 1)}
+                      title="+1"
+                    >
+                      +
+                    </Button>
+                  </div>
+
+                  {num(l.qty) <= 0 && (
+                    <div className="mt-1 text-xs text-red-700">
+                      Cantidad debe ser &gt; 0 para incluirse.
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function PurchaseOrderDrawer({
   open,
   onClose,
+
+  // single mode (si supplierId != null => single)
   supplierId,
   supplierName,
   lines,
+
+  // deps
   getAccessToken,
   onCreated,
+
+  // multi mode deps
+  allSuppliers,
+  suppliersById,
+  buildSuggestedOrderForSupplier,
 }: {
   open: boolean;
   onClose: () => void;
+
   supplierId: string | null;
   supplierName: string;
   lines: Array<{ ingredientId: string; label: string; qty: number }>;
+
   getAccessToken: any;
   onCreated: () => void;
+
+  allSuppliers: string[];
+  suppliersById: Record<string, Supplier>;
+  buildSuggestedOrderForSupplier: (
+    supplier: string
+  ) => Array<{ ingredientId: string; label: string; qty: number }>;
 }) {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ ahora las líneas se editan localmente
+  const isMulti = supplierId == null && allSuppliers.length > 1;
+
+  // single
   const [draftLines, setDraftLines] = useState(lines);
+
+  // multi
+  const [draftBySupplier, setDraftBySupplier] = useState<
+    Record<string, Array<{ ingredientId: string; label: string; qty: number }>>
+  >({});
 
   useEffect(() => {
     if (!open) return;
     setNotes("");
     setErr(null);
-    setDraftLines(lines);
-  }, [open, lines]);
 
-  function setLineQty(ingredientId: string, next: number) {
+    if (!isMulti) {
+      setDraftLines(lines);
+    } else {
+      const next: Record<string, any> = {};
+      for (const sid of allSuppliers) {
+        next[sid] = buildSuggestedOrderForSupplier(sid);
+      }
+      setDraftBySupplier(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isMulti, supplierId, allSuppliers.join("|")]);
+
+  function setLineQtySingle(ingredientId: string, next: number) {
     const v = Number(next);
     const safe = Number.isFinite(v) ? v : 0;
     setDraftLines((prev) =>
@@ -571,42 +774,54 @@ function PurchaseOrderDrawer({
     );
   }
 
-  function removeLine(ingredientId: string) {
-    setDraftLines((prev) =>
-      prev.filter((l) => l.ingredientId !== ingredientId)
-    );
+  function setLineQtyMulti(
+    supplierId: string,
+    ingredientId: string,
+    next: number
+  ) {
+    const v = Number(next);
+    const safe = Number.isFinite(v) ? v : 0;
+    setDraftBySupplier((prev) => ({
+      ...prev,
+      [supplierId]: (prev[supplierId] ?? []).map((l) =>
+        l.ingredientId === ingredientId
+          ? { ...l, qty: Math.max(0, safe) }
+          : l
+      ),
+    }));
   }
 
-  async function createPO() {
-    setErr(null);
-
-    if (!supplierId) {
-      setErr("No hay proveedor.");
-      return;
-    }
-
-    const items = draftLines
+  async function createPOFor(
+    supplierIdToCreate: string,
+    supplierLines: Array<{ ingredientId: string; qty: number; label: string }>
+  ) {
+    const items = supplierLines
       .map((l) => ({ ingredientId: l.ingredientId, qty: num(l.qty) }))
       .filter((x) => x.ingredientId && x.qty > 0);
 
     if (!items.length) {
-      setErr("No hay ítems con cantidad > 0.");
-      return;
+      throw new Error("No hay ítems con cantidad > 0.");
     }
+
+    const payload: POCreatePayload = {
+      supplierId: supplierIdToCreate,
+      notes: notes.trim() || null,
+      items,
+    };
+
+    await apiFetchAuthed(getAccessToken, API_PURCHASE_ORDERS, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function onCreateSingle() {
+    setErr(null);
+    if (!supplierId) return setErr("No hay proveedor.");
 
     setBusy(true);
     try {
-      const payload: POCreatePayload = {
-        supplierId,
-        notes: notes.trim() || null,
-        items,
-      };
-
-      await apiFetchAuthed(getAccessToken, API_PURCHASE_ORDERS, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
+      await createPOFor(supplierId, draftLines);
       onCreated();
       onClose();
     } catch (e: any) {
@@ -616,17 +831,49 @@ function PurchaseOrderDrawer({
     }
   }
 
+  async function onCreateOneSupplier(sid: string) {
+    setErr(null);
+    setBusy(true);
+    try {
+      await createPOFor(sid, draftBySupplier[sid] ?? []);
+      onCreated();
+      // dejamos abierto para que pueda seguir con los otros
+    } catch (e: any) {
+      setErr(e?.message || "Error creando pedido");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCreateAll() {
+    setErr(null);
+    setBusy(true);
+    try {
+      for (const sid of allSuppliers) {
+        await createPOFor(sid, draftBySupplier[sid] ?? []);
+      }
+      onCreated();
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || "Error creando pedidos");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-70">
+    <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
-            <div className="text-xs text-zinc-500">Crear pedido</div>
+            <div className="text-xs text-zinc-500">
+              {isMulti ? "Crear pedidos (multi proveedor)" : "Crear pedido"}
+            </div>
             <div className="text-lg font-semibold text-zinc-900">
-              {supplierName}
+              {isMulti ? `${allSuppliers.length} proveedores` : supplierName}
             </div>
           </div>
           <Button variant="secondary" onClick={onClose} disabled={busy}>
@@ -638,7 +885,10 @@ function PurchaseOrderDrawer({
           {err && <Notice tone="error">{err}</Notice>}
 
           <Card>
-            <CardHeader title="Notas" subtitle="Opcional" />
+            <CardHeader
+              title="Notas"
+              subtitle="Se aplican a los pedidos creados"
+            />
             <CardBody>
               <Input
                 value={notes}
@@ -648,119 +898,64 @@ function PurchaseOrderDrawer({
             </CardBody>
           </Card>
 
-          <div className="rounded-2xl border border-zinc-200 overflow-hidden">
-            <div className="border-b px-4 py-3 text-sm font-semibold text-zinc-900 flex items-center justify-between">
-              <span>Ítems ({draftLines.length})</span>
-              <span className="text-xs font-normal text-zinc-500">
-                Editá cantidades antes de crear
-              </span>
-            </div>
+          {!isMulti ? (
+            <>
+              <LinesEditor
+                busy={busy}
+                lines={draftLines}
+                onChangeQty={setLineQtySingle}
+              />
+              <div className="flex justify-end">
+                <Button onClick={onCreateSingle} loading={busy} disabled={busy}>
+                  Crear pedido
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-end">
+                <Button onClick={onCreateAll} loading={busy} disabled={busy}>
+                  Crear todos
+                </Button>
+              </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
-                      Ingrediente
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-zinc-500">
-                      Cantidad
-                    </th>
-                    <th className="px-4 py-2" />
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y">
-                  {draftLines.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={3}
-                        className="px-4 py-8 text-sm text-zinc-500"
-                      >
-                        No hay ítems.
-                      </td>
-                    </tr>
-                  )}
-
-                  {draftLines.map((l) => (
-                    <tr key={l.ingredientId}>
-                      <td className="px-4 py-2 text-sm">
-                        <div className="font-semibold text-zinc-900">
-                          {l.label}
+              <div className="space-y-3">
+                {allSuppliers.map((sid) => {
+                  const name = suppliersById[sid]?.name ?? sid;
+                  const sLines = draftBySupplier[sid] ?? [];
+                  return (
+                    <div
+                      key={sid}
+                      className="rounded-2xl border border-zinc-200 overflow-hidden"
+                    >
+                      <div className="border-b px-4 py-3 flex items-center justify-between">
+                        <div className="text-sm font-semibold text-zinc-900">
+                          {name}
                         </div>
-                        <div className="text-xs text-zinc-500">
-                          {l.ingredientId.slice(-6)}
-                        </div>
-                      </td>
-
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() =>
-                              setLineQty(l.ingredientId, num(l.qty) - 1)
-                            }
-                            title="-1"
-                          >
-                            −
-                          </Button>
-
-                          <Input
-                            value={String(l.qty ?? 0)}
-                            onChange={(e) =>
-                              setLineQty(l.ingredientId, Number(e.target.value))
-                            }
-                            inputMode="decimal"
-                            className="w-28"
-                            placeholder="0"
-                          />
-
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() =>
-                              setLineQty(l.ingredientId, num(l.qty) + 1)
-                            }
-                            title="+1"
-                          >
-                            +
-                          </Button>
-                        </div>
-
-                        {num(l.qty) <= 0 && (
-                          <div className="mt-1 text-xs text-red-700">
-                            Cantidad debe ser &gt; 0 para incluirse en el
-                            pedido.
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-2 text-right">
                         <Button
-                          type="button"
-                          variant="secondary"
+                          onClick={() => onCreateOneSupplier(sid)}
+                          loading={busy}
                           disabled={busy}
-                          onClick={() => removeLine(l.ingredientId)}
-                          title="Quitar ítem"
                         >
-                          Quitar
+                          Crear pedido
                         </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                      </div>
 
-          <div className="flex justify-end">
-            <Button onClick={createPO} loading={busy} disabled={busy}>
-              Crear pedido
-            </Button>
-          </div>
+                      <div className="p-4">
+                        <LinesEditor
+                          busy={busy}
+                          lines={sLines}
+                          onChangeQty={(ingredientId, next) =>
+                            setLineQtyMulti(sid, ingredientId, next)
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           <div className="text-xs text-zinc-500">POST /purchase-orders</div>
         </div>
@@ -804,7 +999,7 @@ export default function ManagerStockPage() {
   const [activeIngredient, setActiveIngredient] =
     useState<IngredientRow | null>(null);
 
-  // PO drawer
+  // PO drawer (single o multi)
   const [poOpen, setPoOpen] = useState(false);
   const [poSupplierId, setPoSupplierId] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<
@@ -865,7 +1060,13 @@ export default function ManagerStockPage() {
 
         return true;
       })
-      .sort((a, b) => prettyName(a).localeCompare(prettyName(b)));
+      .sort((a, b) => {
+        // bonus UX: bajos primero, luego alfabético
+        const aLow = num(a.stock?.minQty) > 0 && num(a.stock?.onHand) < num(a.stock?.minQty);
+        const bLow = num(b.stock?.minQty) > 0 && num(b.stock?.onHand) < num(b.stock?.minQty);
+        if (aLow !== bLow) return aLow ? -1 : 1;
+        return prettyName(a).localeCompare(prettyName(b));
+      });
   }, [ingredients, q, onlyLow, supplierId]);
 
   const totals = useMemo(() => {
@@ -881,12 +1082,44 @@ export default function ManagerStockPage() {
     return { total, low, selectedCount };
   }, [ingredients, selected]);
 
+  const selectedSupplierIds = useMemo(() => {
+    const ids = Object.keys(selected).filter((id) => selected[id]);
+    const set = new Set(
+      ingredients
+        .filter((i) => ids.includes(i.id))
+        .map((i) => String(i.supplierId || ""))
+        .filter(Boolean)
+    );
+    return Array.from(set);
+  }, [selected, ingredients]);
+
   function toggleSel(id: string) {
     setSelected((p) => ({ ...p, [id]: !p[id] }));
   }
 
   function clearSel() {
     setSelected({});
+  }
+
+  function selectVisible() {
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const r of rows) next[r.id] = true;
+      return next;
+    });
+  }
+
+  function selectLowVisible() {
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const i of rows) {
+        const onHand = num(i.stock?.onHand);
+        const minQty = num(i.stock?.minQty);
+        const low = minQty > 0 && onHand < minQty;
+        if (low) next[i.id] = true;
+      }
+      return next;
+    });
   }
 
   function openManual(i: IngredientRow) {
@@ -944,17 +1177,18 @@ export default function ManagerStockPage() {
       return;
     }
 
-    if (list.length > 1) {
-      setErr(
-        "Seleccionaste ingredientes de más de 1 proveedor. Por ahora armamos 1 pedido por vez (1 proveedor)."
-      );
+    // ✅ single proveedor: armamos líneas y abrimos como siempre
+    if (list.length === 1) {
+      const supplier = list[0];
+      setPoSupplierId(supplier);
+      setPoLines(buildSuggestedOrderForSupplier(supplier));
+      setPoOpen(true);
+      return;
     }
 
-    const supplier = list[0];
-    const lines = buildSuggestedOrderForSupplier(supplier);
-
-    setPoSupplierId(supplier);
-    setPoLines(lines);
+    // ✅ multi proveedor: abrimos drawer en modo multi (supplierId null)
+    setPoSupplierId(null);
+    setPoLines([]);
     setPoOpen(true);
   }
 
@@ -1144,10 +1378,7 @@ export default function ManagerStockPage() {
 
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-10 text-sm text-zinc-500"
-                    >
+                    <td colSpan={7} className="px-4 py-10 text-sm text-zinc-500">
                       No hay ingredientes con esos filtros.
                     </td>
                   </tr>
@@ -1170,16 +1401,14 @@ export default function ManagerStockPage() {
                     return (
                       <tr
                         key={i.id}
-                        className={cn(
-                          "hover:bg-zinc-50",
-                          low && "bg-red-50/30"
-                        )}
+                        className={cn("hover:bg-zinc-50", low && "bg-red-50/30")}
                       >
                         <td className="px-4 py-3">
                           <input
                             type="checkbox"
                             checked={Boolean(selected[i.id])}
                             onChange={() => toggleSel(i.id)}
+                            className="h-4 w-4 accent-zinc-900"
                           />
                         </td>
 
@@ -1269,7 +1498,8 @@ export default function ManagerStockPage() {
           </div>
 
           <div className="border-t border-zinc-100 px-5 py-4 text-xs text-zinc-500">
-            Si querés, sumamos “Editar minQty / idealQty” inline acá mismo.
+            Tip: usá la barra flotante para “Seleccionar visibles / bajos” y
+            crear pedidos rápido.
           </div>
         </div>
 
@@ -1298,9 +1528,24 @@ export default function ManagerStockPage() {
           lines={poLines}
           getAccessToken={getAccessToken}
           onCreated={() => {
-            flashOk("Pedido creado ✔");
+            flashOk("Pedido(s) creado ✔");
             clearSel();
           }}
+          allSuppliers={selectedSupplierIds}
+          suppliersById={suppliersById}
+          buildSuggestedOrderForSupplier={buildSuggestedOrderForSupplier}
+        />
+
+        {/* Sticky Selection Bar */}
+        <SelectionBar
+          selectedCount={totals.selectedCount}
+          suppliersCount={selectedSupplierIds.length}
+          busy={busy || loading}
+          onCreatePO={createPOFromSelection}
+          onCreatePOBySupplier={createPOFromSelection}
+          onSelectVisible={selectVisible}
+          onSelectLowVisible={selectLowVisible}
+          onClear={clearSel}
         />
       </div>
     </AdminProtected>

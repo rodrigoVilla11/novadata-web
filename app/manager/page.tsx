@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
   CalendarDays,
+  Calendar,
 } from "lucide-react";
 
 /* ================= Utils ================= */
@@ -53,6 +54,17 @@ function cn(...classes: Array<string | false | null | undefined>) {
 function num(n: any, fallback = 0) {
   const v = typeof n === "number" ? n : Number(n);
   return Number.isFinite(v) ? v : fallback;
+}
+
+function buildQS(params: Record<string, any>) {
+  const p = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    const s = String(v).trim();
+    if (!s) return;
+    p.set(k, s);
+  });
+  return p.toString();
 }
 
 /* ================= Types ================= */
@@ -103,8 +115,8 @@ export default function ManagerPanel() {
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
   const [alerts, setAlerts] = useState<StockAlertRow[]>([]);
   const [prod, setProd] = useState<ProductionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true); // primera carga / cambio de fecha
+  const [busy, setBusy] = useState(false); // refresh manual
   const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
@@ -120,40 +132,45 @@ export default function ManagerPanel() {
     router.push(path);
   }
 
-  function buildQS(params: Record<string, any>) {
-    const p = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v === undefined || v === null || `${v}`.trim() === "") return;
-      p.set(k, String(v));
-    });
-    return p.toString();
+  function providerKey(r: StockAlertRow) {
+    // clave estable (evitar colisiones por mismo name)
+    return r.providerId || r.providerName || "SIN_PROV";
+  }
+  function providerLabel(r: StockAlertRow) {
+    return r.providerName || r.providerId || "Sin proveedor";
   }
 
-  async function load() {
+  function toggleAllProviders(open: boolean, groups: { key: string }[]) {
+    setOpenProviders((prev) => {
+      const next = { ...prev };
+      for (const g of groups) next[g.key] = open;
+      return next;
+    });
+  }
+
+  async function load(opts?: { silent?: boolean }) {
     if (!getAccessToken) return;
 
     const seq = ++reqSeq.current;
 
     setError(null);
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
 
     try {
       const qsAlerts = buildQS({ dateKey, branchId });
       const qsProd = buildQS({ dateKey, limit: 25, branchId });
 
-      // ✅ paralelo y consistente
       const [a, p] = await Promise.all([
         apiFetchAuthed<StockAlertRow[]>(
           getAccessToken,
-          `/stock/alerts?dateKey=${dateKey}`
+          `/stock/alerts?${qsAlerts}` // ✅ usa qs (incluye branchId)
         ),
         apiFetchAuthed<ProductionRow[]>(
           getAccessToken,
-          `/production?${qsProd}`
+          `/production?${qsProd}` // ✅ usa qs (incluye branchId)
         ),
       ]);
 
-      // ✅ si hubo una request más nueva, ignorar
       if (seq !== reqSeq.current) return;
 
       setAlerts(Array.isArray(a) ? a : []);
@@ -165,10 +182,11 @@ export default function ManagerPanel() {
       setProd([]);
     } finally {
       if (seq !== reqSeq.current) return;
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }
 
+  // carga normal cuando cambia fecha/sucursal
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,18 +211,26 @@ export default function ManagerPanel() {
   }, [alerts, query, onlyProblems]);
 
   const groupedByProvider = useMemo(() => {
-    const map = new Map<string, StockAlertRow[]>();
+    const map = new Map<string, { label: string; rows: StockAlertRow[] }>();
+
     for (const r of filteredAlerts) {
-      const key = r.providerName || r.providerId || "Sin proveedor";
-      map.set(key, [...(map.get(key) || []), r]);
+      const key = providerKey(r);
+      const label = providerLabel(r);
+      const bucket = map.get(key) || { label, rows: [] };
+      bucket.rows.push(r);
+      map.set(key, bucket);
     }
+
     return [...map.entries()]
-      .map(([provider, rows]) => ({
-        provider,
-        rows: rows.slice().sort((a, b) => (a.name || "").localeCompare(b.name)),
-        low: rows.filter((x) => x.status === "LOW").length,
-        noc: rows.filter((x) => x.status === "NO_COUNT").length,
-      }))
+      .map(([key, v]) => {
+        const rows = v.rows
+          .slice()
+          .sort((a, b) => (a.name || "").localeCompare(b.name));
+        const low = rows.filter((x) => x.status === "LOW").length;
+        const noc = rows.filter((x) => x.status === "NO_COUNT").length;
+
+        return { key, provider: v.label, rows, low, noc };
+      })
       .sort((a, b) => b.low + b.noc - (a.low + a.noc));
   }, [filteredAlerts]);
 
@@ -213,7 +239,7 @@ export default function ManagerPanel() {
     setOpenProviders((prev) => {
       const next = { ...prev };
       groupedByProvider.forEach((g) => {
-        if (next[g.provider] === undefined) next[g.provider] = true;
+        if (next[g.key] === undefined) next[g.key] = true;
       });
       return next;
     });
@@ -255,11 +281,6 @@ export default function ManagerPanel() {
 
               <p className="mt-1 text-sm text-zinc-500">
                 Operación diaria: stock, producción y control.
-                {branchId ? (
-                  <span className="ml-2 text-xs text-zinc-400">
-                    • Sucursal: <b className="text-zinc-600">{branchId}</b>
-                  </span>
-                ) : null}
               </p>
             </div>
 
@@ -276,8 +297,11 @@ export default function ManagerPanel() {
                 variant="secondary"
                 onClick={async () => {
                   setBusy(true);
-                  await load();
-                  setBusy(false);
+                  try {
+                    await load({ silent: true }); // ✅ no pisa loading (solo busy)
+                  } finally {
+                    setBusy(false);
+                  }
                 }}
                 loading={busy}
                 title="Recargar"
@@ -307,8 +331,10 @@ export default function ManagerPanel() {
                 className="mt-4"
                 onClick={() => safePush("/manager/stock")}
               >
-                <Package className="h-4 w-4" />
-                Ir a Stock
+                <span className="inline-flex items-center gap-2">
+                  <Package className="h-4 w-4" />
+                  Ir a Stock
+                </span>
               </Button>
             </CardBody>
           </Card>
@@ -322,36 +348,63 @@ export default function ManagerPanel() {
                 className="mt-4"
                 onClick={() => safePush("/manager/production")}
               >
-                <Factory className="h-4 w-4" />
-                Ir a Producción
+                <span className="inline-flex items-center gap-2">
+                  <Factory className="h-4 w-4" />
+                  Ir a Producción
+                </span>
               </Button>
             </CardBody>
           </Card>
 
           <Card>
-            <CardHeader title="Acciones rápidas" />
+            <CardHeader
+              title="Acciones rápidas"
+              subtitle="Atajos de uso diario"
+            />
             <CardBody>
-              <Button onClick={() => safePush("/manager/stock")}>
-                <Package className="h-4 w-4" />
-                Stock
-              </Button>
-              <Button onClick={() => safePush("/manager/production")}>
-                <Factory className="h-4 w-4" />
-                Producción
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => safePush("/manager/attendance")}
-              >
-                <ClipboardList className="h-4 w-4" />
-                Asistencia
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => safePush("/manager/weekly")}
-              >
-                Weekly
-              </Button>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Button
+                  className="w-full justify-start"
+                  onClick={() => safePush("/manager/stock")}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Stock
+                  </span>
+                </Button>
+
+                <Button
+                  className="w-full justify-start"
+                  onClick={() => safePush("/manager/production")}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Factory className="h-4 w-4" />
+                    Producción
+                  </span>
+                </Button>
+
+                <Button
+                  variant="secondary"
+                  className="w-full justify-start"
+                  onClick={() => safePush("/manager/attendance")}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <ClipboardList className="h-4 w-4" />
+                    Asistencia
+                  </span>
+                </Button>
+
+                <Button
+                  variant="secondary"
+                  className="w-full justify-start"
+                  onClick={() => safePush("/manager/weekly")}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4" />
+                    Weekly
+                  </span>
+                </Button>
+              </div>
             </CardBody>
           </Card>
         </div>
@@ -381,7 +434,7 @@ export default function ManagerPanel() {
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Buscar producto / proveedor..."
                     className={cn(
-                      "h-10 w-[260px] rounded-2xl border border-zinc-200 bg-white pl-10 pr-3 text-sm",
+                      "h-10 w-65 rounded-2xl border border-zinc-200 bg-white pl-10 pr-3 text-sm",
                       "focus:outline-none focus:ring-4 focus:ring-emerald-100"
                     )}
                   />
@@ -412,29 +465,13 @@ export default function ManagerPanel() {
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() =>
-                    setOpenProviders((prev) => {
-                      const next: Record<string, boolean> = { ...prev };
-                      groupedByProvider.forEach(
-                        (g) => (next[g.provider] = true)
-                      );
-                      return next;
-                    })
-                  }
+                  onClick={() => toggleAllProviders(true, groupedByProvider)}
                 >
                   <ChevronDown className="h-4 w-4" /> Abrir todo
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={() =>
-                    setOpenProviders((prev) => {
-                      const next: Record<string, boolean> = { ...prev };
-                      groupedByProvider.forEach(
-                        (g) => (next[g.provider] = false)
-                      );
-                      return next;
-                    })
-                  }
+                  onClick={() => toggleAllProviders(false, groupedByProvider)}
                 >
                   <ChevronUp className="h-4 w-4" /> Cerrar todo
                 </Button>
@@ -466,10 +503,10 @@ export default function ManagerPanel() {
                 </div>
               ) : (
                 groupedByProvider.map((g) => {
-                  const isOpen = !!openProviders[g.provider];
+                  const isOpen = !!openProviders[g.key];
                   return (
                     <div
-                      key={g.provider}
+                      key={g.key}
                       className="rounded-2xl border border-zinc-200 overflow-hidden"
                     >
                       <button
@@ -477,12 +514,10 @@ export default function ManagerPanel() {
                         onClick={() =>
                           setOpenProviders((prev) => ({
                             ...prev,
-                            [g.provider]: !prev[g.provider],
+                            [g.key]: !prev[g.key],
                           }))
                         }
-                        className={cn(
-                          "w-full px-4 py-3 bg-white hover:bg-zinc-50 transition flex items-center justify-between gap-3"
-                        )}
+                        className="w-full px-4 py-3 bg-white hover:bg-zinc-50 transition flex items-center justify-between gap-3"
                       >
                         <div className="min-w-0 text-left">
                           <div className="truncate font-semibold text-zinc-900">
@@ -530,7 +565,7 @@ export default function ManagerPanel() {
 
                               return (
                                 <div
-                                  key={`${g.provider}-${r.productId}`}
+                                  key={`${g.key}-${r.productId}`}
                                   className="px-4 py-3 flex items-center justify-between gap-4"
                                 >
                                   <div className="min-w-0">
@@ -614,8 +649,10 @@ export default function ManagerPanel() {
               </div>
 
               <Button onClick={() => safePush("/manager/production")}>
-                <Factory className="h-4 w-4" />
-                Abrir Producción
+                <span className="inline-flex items-center gap-2">
+                  <Factory className="h-4 w-4" />
+                  Abrir Producción
+                </span>
               </Button>
             </div>
 
@@ -678,8 +715,10 @@ export default function ManagerPanel() {
                 variant="secondary"
                 onClick={() => safePush("/manager/attendance")}
               >
-                <ClipboardList className="h-4 w-4" />
-                Ir a Asistencia
+                <span className="inline-flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4" />
+                  Ir a Asistencia
+                </span>
               </Button>
               <Button
                 variant="secondary"

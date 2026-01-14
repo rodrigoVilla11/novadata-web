@@ -31,6 +31,10 @@ import {
   Wallet,
   BarChart3,
   ChevronLeft,
+  SlidersHorizontal,
+  X,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 
 /* ===================== */
@@ -65,6 +69,8 @@ const PERIODS: Array<{ label: string; value: PeriodType }> = [
 ];
 
 type ChartMode = "DAILY" | "CUMULATIVE";
+type Tone = "good" | "bad";
+const netTone = (v: number): Tone => (v >= 0 ? "good" : "bad");
 
 /* ===================== */
 /* Page */
@@ -77,13 +83,18 @@ export default function FinanceStatsPage() {
   const [to, setTo] = useState(todayKeyAR());
 
   const [chartMode, setChartMode] = useState<ChartMode>("DAILY");
+  const [showChart, setShowChart] = useState(true);
+
   const [highlightAccountId, setHighlightAccountId] = useState("");
+
+  // mobile filters drawer
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // ✅ siempre mandamos dateKey (AR) salvo custom
   const params = useMemo(() => {
     if (periodType === "custom") return { periodType, from, to };
     if (periodType === "day") return { periodType, dateKey };
-    return { periodType, dateKey }; // ✅ para week/month el backend resuelve rango desde dateKey
+    return { periodType, dateKey }; // week/month: backend resuelve rango desde dateKey
   }, [periodType, dateKey, from, to]);
 
   const q = useGetFinanceStatsQuery(params as any);
@@ -93,7 +104,9 @@ export default function FinanceStatsPage() {
 
   const accountNameById = useMemo(() => {
     const m = new Map<string, string>();
-    for (const a of accounts) m.set(a.id, `${a.name} (${a.type}) ${a.currency}`);
+    for (const a of accounts as any[]) {
+      m.set(String(a.id), `${a.name} (${a.type}) ${a.currency || "ARS"}`);
+    }
     return m;
   }, [accounts]);
 
@@ -105,7 +118,7 @@ export default function FinanceStatsPage() {
 
   const seriesForChart = useMemo(() => {
     const base =
-      q.data?.seriesDaily?.map((r) => ({
+      q.data?.seriesDaily?.map((r: any) => ({
         dateKey: r.dateKey,
         income: Number(r.income || 0),
         expense: Number(r.expense || 0),
@@ -129,10 +142,55 @@ export default function FinanceStatsPage() {
   const rangeLabel = q.data ? `${q.data.range.from} → ${q.data.range.to}` : "—";
 
   const filteredByAccount = useMemo(() => {
-    const rows = q.data?.byAccount ?? [];
+    const rows = (q.data?.byAccount ?? []) as any[];
     if (!highlightAccountId) return rows;
-    return rows.filter((r) => r.accountId === highlightAccountId);
+    return rows.filter(
+      (r) => String(r.accountId) === String(highlightAccountId)
+    );
   }, [q.data, highlightAccountId]);
+
+  const rowsCount = filteredByAccount.length;
+
+  /* ===================== */
+  /* Quick range helpers */
+  /* ===================== */
+
+  function quickToday() {
+    const t = todayKeyAR();
+    setPeriodType("day");
+    setDateKey(t);
+    setFrom(t);
+    setTo(t);
+  }
+  function quickWeek() {
+    const t = todayKeyAR();
+    setPeriodType("week");
+    setDateKey(t);
+  }
+  function quickMonth() {
+    const t = todayKeyAR();
+    setPeriodType("month");
+    setDateKey(t);
+  }
+
+  /* ===================== */
+  /* UI bits */
+  /* ===================== */
+
+  const filtersCount = useMemo(() => {
+    let n = 0;
+    if (periodType !== "month") n++;
+    if (
+      periodType === "custom" &&
+      (from !== todayKeyAR() || to !== todayKeyAR())
+    )
+      n++;
+    if (periodType !== "custom" && dateKey !== todayKeyAR()) n++;
+    if (chartMode !== "DAILY") n++;
+    if (!showChart) n++;
+    if (highlightAccountId) n++;
+    return n;
+  }, [periodType, from, to, dateKey, chartMode, showChart, highlightAccountId]);
 
   /* ===================== */
   /* Render */
@@ -143,8 +201,8 @@ export default function FinanceStatsPage() {
       <div className="space-y-6">
         {/* Header */}
         <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-[240px]">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-60">
               <div className="flex items-center gap-2 text-sm text-zinc-500">
                 <Link
                   href="/admin/finance"
@@ -169,7 +227,18 @@ export default function FinanceStatsPage() {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            {/* Desktop actions */}
+            <div className="hidden md:flex items-center gap-2">
+              <Button variant="secondary" onClick={quickToday}>
+                Hoy
+              </Button>
+              <Button variant="secondary" onClick={quickWeek}>
+                Semana
+              </Button>
+              <Button variant="secondary" onClick={quickMonth}>
+                Mes
+              </Button>
+
               <Button
                 variant="secondary"
                 onClick={() => q.refetch()}
@@ -178,92 +247,139 @@ export default function FinanceStatsPage() {
                 <RefreshCcw className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* Mobile actions */}
+            <div className="flex md:hidden gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setFiltersOpen(true)}
+                className="flex-1"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Filtros
+                {filtersCount ? (
+                  <span className="ml-2 rounded-full bg-zinc-900 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {filtersCount}
+                  </span>
+                ) : null}
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={() => q.refetch()}
+                loading={q.isFetching}
+                className="flex-1"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Refrescar
+              </Button>
+            </div>
           </div>
         </div>
 
-        {/* Filters */}
-        <Card>
-          <CardBody>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
-              <Field label="Período">
-                <Select
-                  value={periodType}
-                  onChange={(e) => setPeriodType(e.target.value as PeriodType)}
+        {/* Desktop Filters */}
+        <div className="hidden md:block">
+          <Card>
+            <CardBody>
+              <Filters
+                periodType={periodType}
+                setPeriodType={setPeriodType}
+                dateKey={dateKey}
+                setDateKey={setDateKey}
+                from={from}
+                setFrom={setFrom}
+                to={to}
+                setTo={setTo}
+                chartMode={chartMode}
+                setChartMode={setChartMode}
+                showChart={showChart}
+                setShowChart={setShowChart}
+                highlightAccountId={highlightAccountId}
+                setHighlightAccountId={setHighlightAccountId}
+                accounts={accounts as any[]}
+                accountsFetching={accountsFetching}
+              />
+            </CardBody>
+          </Card>
+        </div>
+
+        {/* Mobile Filters Drawer */}
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-50 bg-black/40 p-4 flex items-end md:hidden">
+            <div className="w-full rounded-2xl bg-white border shadow-xl overflow-hidden">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <div className="font-semibold text-zinc-900">Filtros</div>
+                <button
+                  onClick={() => setFiltersOpen(false)}
+                  className="rounded-xl border p-2 hover:bg-zinc-50"
+                  title="Cerrar"
                 >
-                  {PERIODS.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
 
-              {periodType === "day" ? (
-                <Field label="Día">
-                  <Input
-                    type="date"
-                    value={dateKey}
-                    onChange={(e) => setDateKey(e.target.value)}
-                  />
-                </Field>
-              ) : periodType === "custom" ? (
-                <>
-                  <Field label="Desde">
-                    <Input
-                      type="date"
-                      value={from}
-                      onChange={(e) => setFrom(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Hasta">
-                    <Input
-                      type="date"
-                      value={to}
-                      onChange={(e) => setTo(e.target.value)}
-                    />
-                  </Field>
-                </>
-              ) : (
-                <Field label="Fecha base">
-                  <Input
-                    type="date"
-                    value={dateKey}
-                    onChange={(e) => setDateKey(e.target.value)}
-                  />
-                </Field>
-              )}
+              <div className="p-4">
+                <Filters
+                  periodType={periodType}
+                  setPeriodType={setPeriodType}
+                  dateKey={dateKey}
+                  setDateKey={setDateKey}
+                  from={from}
+                  setFrom={setFrom}
+                  to={to}
+                  setTo={setTo}
+                  chartMode={chartMode}
+                  setChartMode={setChartMode}
+                  showChart={showChart}
+                  setShowChart={setShowChart}
+                  highlightAccountId={highlightAccountId}
+                  setHighlightAccountId={setHighlightAccountId}
+                  accounts={accounts as any[]}
+                  accountsFetching={accountsFetching}
+                />
 
-              <Field label="Gráfico">
-                <Select
-                  value={chartMode}
-                  onChange={(e) => setChartMode(e.target.value as ChartMode)}
-                >
-                  <option value="DAILY">Diario</option>
-                  <option value="CUMULATIVE">Acumulado</option>
-                </Select>
-              </Field>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+                    onClick={() => setFiltersOpen(false)}
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    className="rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800"
+                    onClick={() => setFiltersOpen(false)}
+                  >
+                    Aplicar
+                  </button>
+                </div>
 
-              <Field label="Cuenta (highlight)">
-                <Select
-                  value={highlightAccountId}
-                  onChange={(e) => setHighlightAccountId(e.target.value)}
-                  disabled={accountsFetching}
-                >
-                  <option value="">Todas</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              <Field label=" ">
-                <Input disabled value="" />
-              </Field>
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={quickToday}
+                    className="flex-1"
+                  >
+                    Hoy
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={quickWeek}
+                    className="flex-1"
+                  >
+                    Semana
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={quickMonth}
+                    className="flex-1"
+                  >
+                    Mes
+                  </Button>
+                </div>
+              </div>
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        ) : null}
 
         {/* Loading / Error */}
         {q.isLoading ? (
@@ -277,52 +393,91 @@ export default function FinanceStatsPage() {
             {/* Summary */}
             {totals && (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-                <Summary label="Ingresos" value={moneyARS(totals.income)} icon={TrendingUp} />
-                <Summary label="Egresos" value={moneyARS(totals.expense)} icon={TrendingDown} />
+                <Summary
+                  label="Ingresos"
+                  value={moneyARS(totals.income)}
+                  icon={TrendingUp}
+                />
+                <Summary
+                  label="Egresos"
+                  value={moneyARS(totals.expense)}
+                  icon={TrendingDown}
+                />
                 <Summary
                   label="Neto"
                   value={moneyARS(totals.net)}
                   icon={Wallet}
-                  emphasis={totals.net >= 0 ? "good" : "bad"}
+                  emphasis={netTone(totals.net)}
                 />
-                <Summary label="Transfer Out" value={moneyARS(totals.transferOut)} icon={ArrowRightLeft} />
-                <Summary label="Transfer In" value={moneyARS(totals.transferIn)} icon={ArrowRightLeft} />
+                <Summary
+                  label="Transfer Out"
+                  value={moneyARS(totals.transferOut)}
+                  icon={ArrowRightLeft}
+                />
+                <Summary
+                  label="Transfer In"
+                  value={moneyARS(totals.transferIn)}
+                  icon={ArrowRightLeft}
+                />
               </div>
             )}
 
             {/* Chart */}
-            <Card>
-              <CardBody>
-                <div className="mb-3 flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4 text-zinc-500" />
-                  <h3 className="font-semibold text-zinc-900">Serie temporal</h3>
-                  <span className="text-xs text-zinc-500">
-                    ({chartMode === "DAILY" ? "diario" : "acumulado"})
-                  </span>
-                </div>
+            {showChart ? (
+              <Card>
+                <CardBody>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4 text-zinc-500" />
+                      <h3 className="font-semibold text-zinc-900">
+                        Serie temporal
+                      </h3>
+                      <span className="text-xs text-zinc-500">
+                        ({chartMode === "DAILY" ? "diario" : "acumulado"})
+                      </span>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setShowChart(false)}
+                    >
+                      Ocultar
+                    </Button>
+                  </div>
 
-                <div style={{ width: "100%", height: 320 }}>
-                  <ResponsiveContainer>
-                    <LineChart data={seriesForChart}>
-                      <XAxis dataKey="dateKey" />
-                      <YAxis
-                        tickFormatter={(v) =>
-                          Intl.NumberFormat("es-AR", { notation: "compact" }).format(Number(v))
-                        }
-                      />
-                      <Tooltip
-                        formatter={(v: any, name: any) => [moneyARS(Number(v)), String(name)]}
-                        labelFormatter={(l) => `Fecha: ${l}`}
-                      />
-                      <Legend />
-                      <Line type="monotone" dataKey="income" />
-                      <Line type="monotone" dataKey="expense" />
-                      <Line type="monotone" dataKey="net" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardBody>
-            </Card>
+                  <div style={{ width: "100%", height: 320 }}>
+                    <ResponsiveContainer>
+                      <LineChart data={seriesForChart}>
+                        <XAxis dataKey="dateKey" />
+                        <YAxis
+                          tickFormatter={(v) =>
+                            Intl.NumberFormat("es-AR", {
+                              notation: "compact",
+                            }).format(Number(v))
+                          }
+                        />
+                        <Tooltip
+                          formatter={(v: any, name: any) => [
+                            moneyARS(Number(v)),
+                            String(name),
+                          ]}
+                          labelFormatter={(l) => `Fecha: ${l}`}
+                        />
+                        <Legend />
+                        <Line type="monotone" dataKey="income" />
+                        <Line type="monotone" dataKey="expense" />
+                        <Line type="monotone" dataKey="net" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardBody>
+              </Card>
+            ) : (
+              <div className="flex justify-end">
+                <Button variant="secondary" onClick={() => setShowChart(true)}>
+                  Mostrar gráfico
+                </Button>
+              </div>
+            )}
 
             {/* By Account */}
             <Card>
@@ -330,11 +485,12 @@ export default function FinanceStatsPage() {
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <h3 className="font-semibold text-zinc-900">Por cuenta</h3>
                   <div className="text-xs text-zinc-500">
-                    Filas: {filteredByAccount.length}
+                    Filas: {rowsCount}
                   </div>
                 </div>
 
-                <div className="overflow-auto rounded-xl border border-zinc-200">
+                {/* Desktop table */}
+                <div className="hidden md:block overflow-auto rounded-xl border border-zinc-200">
                   <table className="min-w-full text-sm">
                     <thead className="bg-zinc-50 text-zinc-500">
                       <tr>
@@ -350,7 +506,7 @@ export default function FinanceStatsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
-                      {filteredByAccount.map((r) => {
+                      {filteredByAccount.map((r: any) => {
                         const start = Number(r.startBalance || 0);
                         const end = Number(r.endBalance || 0);
                         const delta = end - start;
@@ -358,15 +514,30 @@ export default function FinanceStatsPage() {
                         return (
                           <tr key={r.accountId}>
                             <td className="p-3 font-medium text-zinc-900">
-                              {accountNameById.get(r.accountId) || r.accountId}
+                              {accountNameById.get(String(r.accountId)) ||
+                                r.accountId}
                             </td>
-                            <td className="p-3 text-right">{moneyARS(start)}</td>
-                            <td className="p-3 text-right">{moneyARS(r.income)}</td>
-                            <td className="p-3 text-right">{moneyARS(r.expense)}</td>
-                            <td className="p-3 text-right">{moneyARS(r.transferIn)}</td>
-                            <td className="p-3 text-right">{moneyARS(r.transferOut)}</td>
-                            <td className="p-3 text-right">{moneyARS(r.net)}</td>
-                            <td className="p-3 text-right font-semibold">{moneyARS(end)}</td>
+                            <td className="p-3 text-right">
+                              {moneyARS(start)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {moneyARS(r.income)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {moneyARS(r.expense)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {moneyARS(r.transferIn)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {moneyARS(r.transferOut)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {moneyARS(r.net)}
+                            </td>
+                            <td className="p-3 text-right font-semibold">
+                              {moneyARS(end)}
+                            </td>
                             <td
                               className={cn(
                                 "p-3 text-right font-semibold",
@@ -381,6 +552,67 @@ export default function FinanceStatsPage() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Mobile cards */}
+                <div className="md:hidden divide-y divide-zinc-100 rounded-xl border border-zinc-200 overflow-hidden">
+                  {filteredByAccount.map((r: any) => {
+                    const start = Number(r.startBalance || 0);
+                    const end = Number(r.endBalance || 0);
+                    const delta = end - start;
+
+                    return (
+                      <div key={r.accountId} className="p-4">
+                        <div className="font-semibold text-zinc-900">
+                          {accountNameById.get(String(r.accountId)) ||
+                            r.accountId}
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                          <div className="text-zinc-500">Start</div>
+                          <div className="text-right font-semibold">
+                            {moneyARS(start)}
+                          </div>
+
+                          <div className="text-zinc-500">Ingresos</div>
+                          <div className="text-right">{moneyARS(r.income)}</div>
+
+                          <div className="text-zinc-500">Egresos</div>
+                          <div className="text-right">
+                            {moneyARS(r.expense)}
+                          </div>
+
+                          <div className="text-zinc-500">Transfer In</div>
+                          <div className="text-right">
+                            {moneyARS(r.transferIn)}
+                          </div>
+
+                          <div className="text-zinc-500">Transfer Out</div>
+                          <div className="text-right">
+                            {moneyARS(r.transferOut)}
+                          </div>
+
+                          <div className="text-zinc-500">Neto</div>
+                          <div className="text-right">{moneyARS(r.net)}</div>
+
+                          <div className="text-zinc-500">End</div>
+                          <div className="text-right font-semibold">
+                            {moneyARS(end)}
+                          </div>
+
+                          <div className="text-zinc-500">Δ</div>
+                          <div
+                            className={cn(
+                              "text-right font-semibold",
+                              delta >= 0 ? "text-emerald-700" : "text-red-700"
+                            )}
+                          >
+                            {moneyARS(delta)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </CardBody>
             </Card>
           </>
@@ -391,8 +623,133 @@ export default function FinanceStatsPage() {
 }
 
 /* ===================== */
-/* Small components */
+/* Components */
 /* ===================== */
+
+function Filters(props: {
+  periodType: PeriodType;
+  setPeriodType: (v: PeriodType) => void;
+  dateKey: string;
+  setDateKey: (v: string) => void;
+  from: string;
+  setFrom: (v: string) => void;
+  to: string;
+  setTo: (v: string) => void;
+  chartMode: ChartMode;
+  setChartMode: (v: ChartMode) => void;
+  showChart: boolean;
+  setShowChart: (v: boolean) => void;
+  highlightAccountId: string;
+  setHighlightAccountId: (v: string) => void;
+  accounts: any[];
+  accountsFetching: boolean;
+}) {
+  const {
+    periodType,
+    setPeriodType,
+    dateKey,
+    setDateKey,
+    from,
+    setFrom,
+    to,
+    setTo,
+    chartMode,
+    setChartMode,
+    showChart,
+    setShowChart,
+    highlightAccountId,
+    setHighlightAccountId,
+    accounts,
+    accountsFetching,
+  } = props;
+
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
+      <Field label="Período">
+        <Select
+          value={periodType}
+          onChange={(e) => setPeriodType(e.target.value as PeriodType)}
+        >
+          {PERIODS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {periodType === "day" ? (
+        <Field label="Día">
+          <Input
+            type="date"
+            value={dateKey}
+            onChange={(e) => setDateKey(e.target.value)}
+          />
+        </Field>
+      ) : periodType === "custom" ? (
+        <>
+          <Field label="Desde">
+            <Input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </Field>
+          <Field label="Hasta">
+            <Input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </Field>
+        </>
+      ) : (
+        <Field label="Fecha base">
+          <Input
+            type="date"
+            value={dateKey}
+            onChange={(e) => setDateKey(e.target.value)}
+          />
+        </Field>
+      )}
+
+      <Field label="Gráfico">
+        <Select
+          value={chartMode}
+          onChange={(e) => setChartMode(e.target.value as ChartMode)}
+        >
+          <option value="DAILY">Diario</option>
+          <option value="CUMULATIVE">Acumulado</option>
+        </Select>
+      </Field>
+
+      <Field label="Mostrar gráfico">
+        <Select
+          value={showChart ? "yes" : "no"}
+          onChange={(e) => setShowChart(e.target.value === "yes")}
+        >
+          <option value="yes">Sí</option>
+          <option value="no">No</option>
+        </Select>
+      </Field>
+
+      <Field label="Cuenta (highlight)">
+        <Select
+          value={highlightAccountId}
+          onChange={(e) => setHighlightAccountId(e.target.value)}
+          disabled={accountsFetching}
+        >
+          <option value="">Todas</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </div>
+  );
+}
 
 function Summary({
   label,

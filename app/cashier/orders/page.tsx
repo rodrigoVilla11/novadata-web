@@ -212,7 +212,7 @@ function PayOrderModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-4 md:items-center">
+    <div className="fixed inset-0 z-60 flex items-end justify-center bg-black/40 p-4 md:items-center">
       <div className="w-full max-w-2xl rounded-3xl bg-white shadow-xl border border-zinc-200">
         <div className="px-5 py-4 border-b border-zinc-100">
           <div className="flex items-start justify-between gap-3">
@@ -334,7 +334,11 @@ function PayOrderModal({
               </div>
             ))}
 
-            <Button variant="secondary" onClick={addPaymentLine} disabled={!!busy}>
+            <Button
+              variant="secondary"
+              onClick={addPaymentLine}
+              disabled={!!busy}
+            >
               Agregar pago
             </Button>
 
@@ -444,9 +448,7 @@ function OrderDrawer({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <ClipboardList className="h-5 w-5 text-zinc-700" />
-              <h3 className="text-lg font-semibold text-zinc-900">
-                Pedido
-              </h3>
+              <h3 className="text-lg font-semibold text-zinc-900">Pedido</h3>
             </div>
             <div className="mt-1 text-xs text-zinc-500 truncate">
               ID: <b className="text-zinc-700">{order?.id ?? "—"}</b>
@@ -566,8 +568,8 @@ function OrderDrawer({
                     <b className="text-zinc-900">{moneyARS(order.total)}</b>
                   </div>
                   <div className="mt-2 text-xs text-zinc-500">
-                    Si tu backend no trae total en Order, igual podés cobrar:
-                    el checkout calcula/valida.
+                    Si tu backend no trae total en Order, igual podés cobrar: el
+                    checkout calcula/valida.
                   </div>
                 </div>
               ) : null}
@@ -599,7 +601,9 @@ export default function CashierOrdersPage() {
 
   const roles = (user?.roles ?? []).map((r: any) => String(r).toUpperCase());
   const canUse =
-    roles.includes("CASHIER") || roles.includes("MANAGER") || roles.includes("ADMIN");
+    roles.includes("CASHIER") ||
+    roles.includes("MANAGER") ||
+    roles.includes("ADMIN");
 
   const todayKey = useMemo(() => todayKeyArgentina(), []);
   const [q, setQ] = useState("");
@@ -620,8 +624,10 @@ export default function CashierOrdersPage() {
   const [payOpen, setPayOpen] = useState(false);
 
   function fulfillmentLabel(f?: string | null) {
-    if (f === "DELIVERY") return { label: "Delivery", icon: <Truck className="h-4 w-4" /> };
-    if (f === "DINE_IN") return { label: "Salón", icon: <Store className="h-4 w-4" /> };
+    if (f === "DELIVERY")
+      return { label: "Delivery", icon: <Truck className="h-4 w-4" /> };
+    if (f === "DINE_IN")
+      return { label: "Salón", icon: <Store className="h-4 w-4" /> };
     return { label: "Take-away", icon: <PackageOpen className="h-4 w-4" /> };
   }
 
@@ -635,7 +641,10 @@ export default function CashierOrdersPage() {
       qs.set("limit", "50");
       if (q.trim()) qs.set("q", q.trim());
 
-      const rows = await apiFetchAuthed<any[]>(getAccessToken, `/orders?${qs.toString()}`);
+      const rows = await apiFetchAuthed<any[]>(
+        getAccessToken,
+        `/orders?${qs.toString()}`
+      );
 
       const norm: OrderRow[] = (rows ?? []).map((o: any) => ({
         id: String(o.id ?? o._id),
@@ -668,21 +677,29 @@ export default function CashierOrdersPage() {
     setDrawerLoading(true);
 
     try {
-      const detail = await apiFetchAuthed<any>(getAccessToken, `/orders/${orderId}`);
+      const detail = await apiFetchAuthed<any>(
+        getAccessToken,
+        `/orders/${orderId}`
+      );
       const d: OrderDetail = {
         id: String(detail.id ?? detail._id),
         status: detail.status ?? null,
-        createdAt: detail.createdAt ?? detail.created_at ?? new Date().toISOString(),
+        createdAt:
+          detail.createdAt ?? detail.created_at ?? new Date().toISOString(),
         fulfillment: (detail.fulfillment ?? detail.type ?? null) as any,
         note: detail.note ?? null,
-        customerSnapshot: detail.customerSnapshot ?? detail.customer_snapshot ?? null,
+        customerSnapshot:
+          detail.customerSnapshot ?? detail.customer_snapshot ?? null,
         total: detail.total ?? detail.amount ?? detail.totals?.net ?? null,
         items: (detail.items ?? []).map((it: any) => ({
-          productId: String(it.productId ?? it.product_id ?? it.product?.id ?? it.product?._id),
+          productId: String(
+            it.productId ?? it.product_id ?? it.product?.id ?? it.product?._id
+          ),
           qty: num(it.qty),
           note: it.note ?? null,
           name: it.name ?? it.product?.name ?? null,
-          unitPrice: it.unitPrice ?? it.unit_price ?? it.product?.salePrice ?? null,
+          unitPrice:
+            it.unitPrice ?? it.unit_price ?? it.product?.salePrice ?? null,
         })),
       };
 
@@ -708,26 +725,32 @@ export default function CashierOrdersPage() {
     setErr(null);
 
     try {
-      const res = await apiFetchAuthed<CheckoutResult>(getAccessToken, "/pos/checkout", {
-        method: "POST",
-        body: JSON.stringify({
-          dateKey: todayKey,
-          fulfillment: selectedOrder.fulfillment ?? "TAKEAWAY",
-          customerId: null,
-          customerSnapshot: selectedOrder.customerSnapshot ?? null,
-          note: payload.note ?? selectedOrder.note ?? null,
-          items: selectedOrder.items.map((it) => ({
-            productId: it.productId,
-            qty: num(it.qty),
-            note: it.note ?? null,
-          })),
-          payments: payload.payments,
-          concept: payload.concept,
-          categoryId: null,
-        }),
-      });
+      const res = await apiFetchAuthed<CheckoutResult>(
+        getAccessToken,
+        "/pos/checkout",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            dateKey: todayKey,
+            fulfillment: selectedOrder.fulfillment ?? "TAKEAWAY",
+            customerId: null,
+            customerSnapshot: selectedOrder.customerSnapshot ?? null,
+            note: payload.note ?? selectedOrder.note ?? null,
+            items: selectedOrder.items.map((it) => ({
+              productId: it.productId,
+              qty: num(it.qty),
+              note: it.note ?? null,
+            })),
+            payments: payload.payments,
+            concept: payload.concept,
+            categoryId: null,
+          }),
+        }
+      );
 
-      setOk(`Cobrado ✔ (Sale: ${String(res?.sale?.id ?? res?.sale?._id ?? "OK")})`);
+      setOk(
+        `Cobrado ✔ (Sale: ${String(res?.sale?.id ?? res?.sale?._id ?? "OK")})`
+      );
       setTimeout(() => setOk(null), 1500);
 
       setPayOpen(false);
@@ -781,8 +804,10 @@ export default function CashierOrdersPage() {
                 onClick={refreshAll}
                 loading={busy || loading}
               >
-                <RefreshCcw className="h-4 w-4" />
-                Actualizar
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4" />
+                  Actualizar
+                </span>
               </Button>
             </div>
           </div>
@@ -816,14 +841,17 @@ export default function CashierOrdersPage() {
                   onClick={() => loadOrdersToday()}
                   disabled={!canUse || busy}
                 >
-                  <Search className="h-4 w-4" />
-                  Buscar
+                  <span className="inline-flex items-center gap-2">
+                    <Search className="h-4 w-4" />
+                    Buscar{" "}
+                  </span>
                 </Button>
               </div>
             </Field>
 
             <div className="md:col-span-2 text-xs text-zinc-500 flex items-center">
-              Tip: tocá <b>Ver</b> para abrir el panel lateral con detalle y cobro.
+              Tip: tocá Ver para abrir el panel lateral con detalle y
+              cobro.
             </div>
           </div>
         </div>
@@ -831,7 +859,9 @@ export default function CashierOrdersPage() {
         {/* List */}
         <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-100 px-5 py-4">
-            <h2 className="text-lg font-semibold text-zinc-900">Pedidos de hoy</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">
+              Pedidos de hoy
+            </h2>
             <p className="mt-1 text-sm text-zinc-500">
               Total: <b>{orders.length}</b>
             </p>
@@ -870,7 +900,10 @@ export default function CashierOrdersPage() {
 
                 {!loading && orders.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-sm text-zinc-500">
+                    <td
+                      colSpan={5}
+                      className="px-4 py-10 text-sm text-zinc-500"
+                    >
                       No hay pedidos hoy.
                     </td>
                   </tr>
@@ -886,7 +919,9 @@ export default function CashierOrdersPage() {
                       <tr key={o.id} className="hover:bg-zinc-50">
                         <td className="px-4 py-3 text-sm text-zinc-600">
                           {new Date(o.createdAt).toLocaleString("es-AR")}
-                          <div className="text-xs text-zinc-400">ID: {o.id}</div>
+                          <div className="text-xs text-zinc-400">
+                            ID: {o.id}
+                          </div>
                         </td>
 
                         <td className="px-4 py-3 text-sm text-zinc-700">
@@ -912,7 +947,7 @@ export default function CashierOrdersPage() {
                             {o.status ?? "—"}
                           </span>
                           {o.note ? (
-                            <div className="mt-1 text-xs text-zinc-500 truncate max-w-[360px]">
+                            <div className="mt-1 text-xs text-zinc-500 truncate max-w-90">
                               Nota: {o.note}
                             </div>
                           ) : null}

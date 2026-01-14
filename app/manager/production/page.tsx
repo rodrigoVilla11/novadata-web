@@ -215,10 +215,10 @@ export default function ProductionPage() {
 
     try {
       const emps = await apiFetchAuthed<EmployeeRow[]>(getAccessToken, "/employees?activeOnly=true");
-      setEmployees(emps);
+      setEmployees(Array.isArray(emps) ? emps : []);
 
       const activeTasks = await apiFetchAuthed<TaskRow[]>(getAccessToken, "/tasks?activeOnly=true");
-      setTasks(activeTasks);
+      setTasks(Array.isArray(activeTasks) ? activeTasks : []);
 
       const prod = await apiFetchAuthed<ProductionRow[]>(
         getAccessToken,
@@ -232,8 +232,8 @@ export default function ProductionPage() {
       setRows(normalized);
 
       if (!opts?.keepSelection) {
-        if (!employeeId && emps[0]?.id) setEmployeeId(emps[0].id);
-        if (!taskId && activeTasks[0]?.id) setTaskId(activeTasks[0].id);
+        if (!employeeId && Array.isArray(emps) && emps[0]?.id) setEmployeeId(emps[0].id);
+        if (!taskId && Array.isArray(activeTasks) && activeTasks[0]?.id) setTaskId(activeTasks[0].id);
       }
     } catch (e: any) {
       setError(e?.message || "Error cargando producción");
@@ -511,6 +511,7 @@ export default function ProductionPage() {
                   placeholder="Ej: 10"
                   inputMode="numeric"
                   disabled={busy}
+                  ref={qtyRef}
                 />
               </Field>
 
@@ -579,7 +580,11 @@ export default function ProductionPage() {
               </Field>
 
               <div className="flex items-end justify-end gap-2">
-                <Button variant={!hideCanceled ? "secondary" : "ghost"} onClick={() => setHideCanceled((v) => !v)} disabled={loading}>
+                <Button
+                  variant={!hideCanceled ? "secondary" : "ghost"}
+                  onClick={() => setHideCanceled((v) => !v)}
+                  disabled={loading}
+                >
                   {!hideCanceled ? "Mostrando cancelados" : "Ocultar cancelados"}
                 </Button>
 
@@ -587,11 +592,19 @@ export default function ProductionPage() {
                   {onlyDone ? "Solo hechas" : "Hechas"}
                 </Button>
 
-                <Button variant={onlyWithNotes ? "secondary" : "ghost"} onClick={() => setOnlyWithNotes((v) => !v)} disabled={loading}>
+                <Button
+                  variant={onlyWithNotes ? "secondary" : "ghost"}
+                  onClick={() => setOnlyWithNotes((v) => !v)}
+                  disabled={loading}
+                >
                   {onlyWithNotes ? "Solo con notas" : "Con notas"}
                 </Button>
 
-                <Button variant={onlyWithQty ? "secondary" : "ghost"} onClick={() => setOnlyWithQty((v) => !v)} disabled={loading}>
+                <Button
+                  variant={onlyWithQty ? "secondary" : "ghost"}
+                  onClick={() => setOnlyWithQty((v) => !v)}
+                  disabled={loading}
+                >
                   {onlyWithQty ? "Solo con qty" : "Con qty"}
                 </Button>
               </div>
@@ -656,13 +669,27 @@ export default function ProductionPage() {
             <table className="min-w-full">
               <thead className="bg-zinc-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Hora</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Empleado</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Tarea</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Estado</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Qty</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Notas</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Acciones</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Hora
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Empleado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Tarea
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Estado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Qty
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Notas
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
 
@@ -750,9 +777,7 @@ export default function ProductionPage() {
                                     {r.notes.map((n, idx) => (
                                       <li key={idx} className="text-sm text-zinc-800">
                                         <div className="flex items-center justify-between gap-2">
-                                          <span className="font-semibold">
-                                            {n.createdByName ?? "—"}
-                                          </span>
+                                          <span className="font-semibold">{n.createdByName ?? "—"}</span>
                                           <span className="text-xs text-zinc-500">
                                             {n.createdAt ? fmtDateTime(n.createdAt) : "—"}
                                           </span>
@@ -777,7 +802,12 @@ export default function ProductionPage() {
                               />
                               <Button
                                 variant="secondary"
-                                disabled={busy || isCanceled || noteBusyId === r.id || !(noteDraftById[r.id] ?? "").trim()}
+                                disabled={
+                                  busy ||
+                                  isCanceled ||
+                                  noteBusyId === r.id ||
+                                  !(noteDraftById[r.id] ?? "").trim()
+                                }
                                 loading={noteBusyId === r.id}
                                 onClick={() => addNote(r.id)}
                               >
@@ -820,7 +850,7 @@ export default function ProductionPage() {
             </table>
           </div>
 
-          {/* Mobile (si querés, te lo adapto igual, pero para no hacerte infinito el mensaje, lo dejamos igual que desktop por ahora) */}
+          {/* Mobile */}
           <div className="md:hidden p-4 text-sm text-zinc-500">
             Te lo adapto a mobile igual que desktop si querés (con acordeón de notas + cancelar/reabrir).
           </div>

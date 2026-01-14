@@ -116,7 +116,8 @@ function StatusChip({ status }: { status?: ClosingStatus | null }) {
     );
   }
 
-  const base = "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold";
+  const base =
+    "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold";
 
   if (status === "LOCKED") {
     return (
@@ -128,7 +129,12 @@ function StatusChip({ status }: { status?: ClosingStatus | null }) {
   }
   if (status === "SUBMITTED") {
     return (
-      <span className={cn(base, "border-emerald-200 bg-emerald-50 text-emerald-800")}>
+      <span
+        className={cn(
+          base,
+          "border-emerald-200 bg-emerald-50 text-emerald-800"
+        )}
+      >
         <CheckCircle2 className="h-4 w-4" />
         ENVIADO
       </span>
@@ -161,8 +167,15 @@ function StatCard({
       : "ring-1 ring-zinc-100";
 
   return (
-    <div className={cn("rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm", ring)}>
-      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{title}</div>
+    <div
+      className={cn(
+        "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm",
+        ring
+      )}
+    >
+      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        {title}
+      </div>
       <div className="mt-1 text-sm text-zinc-500">{subtitle}</div>
       <div className="mt-3 text-2xl font-bold text-zinc-900">{value}</div>
     </div>
@@ -185,6 +198,7 @@ export default function CashierClosingPage() {
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false); // ✅ separado
 
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
@@ -239,7 +253,10 @@ export default function CashierClosingPage() {
     return sum;
   }, [accounts, computedById]);
 
-  const diffTotal = useMemo(() => declaredTotal - computedTotal, [declaredTotal, computedTotal]);
+  const diffTotal = useMemo(
+    () => declaredTotal - computedTotal,
+    [declaredTotal, computedTotal]
+  );
 
   // ----------------------------------------------------------------------------
   // Loaders
@@ -269,7 +286,10 @@ export default function CashierClosingPage() {
       setNotes(c.notes ?? "");
     } catch (e: any) {
       const msg = String(e?.message || "");
-      if (msg.toLowerCase().includes("404") || msg.toLowerCase().includes("no encontrado")) {
+      if (
+        msg.toLowerCase().includes("404") ||
+        msg.toLowerCase().includes("no encontrado")
+      ) {
         setClosing(null);
       } else {
         throw e;
@@ -379,7 +399,8 @@ export default function CashierClosingPage() {
   }
 
   async function lockClosing() {
-    if (!confirm("¿LOCK? Solo ADMIN. Esto bloqueará modificaciones del día.")) return;
+    if (!confirm("¿LOCK? Solo ADMIN. Esto bloqueará modificaciones del día."))
+      return;
     setBusy(true);
     setError(null);
     setOkMsg(null);
@@ -395,6 +416,20 @@ export default function CashierClosingPage() {
       setError(e?.message || "Error lockeando cierre");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refresh() {
+    setRefreshing(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      await loadAll();
+      flashOk("Actualizado");
+    } catch (e: any) {
+      setError(e?.message || "Error actualizando");
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -418,15 +453,6 @@ export default function CashierClosingPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-                  onClick={() => (window.location.href = "/cashier")}
-                  type="button"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Volver
-                </button>
-
                 <div className="min-w-0">
                   <h1 className="truncate text-xl font-bold text-zinc-900 md:text-2xl">
                     Cierre del día
@@ -436,7 +462,9 @@ export default function CashierClosingPage() {
                     <span>•</span>
                     <span>
                       Enviado: {formatDateTimeAR(closing?.submittedAt)}
-                      {closing?.lockedAt ? ` · Lock: ${formatDateTimeAR(closing.lockedAt)}` : ""}
+                      {closing?.lockedAt
+                        ? ` · Lock: ${formatDateTimeAR(closing.lockedAt)}`
+                        : ""}
                     </span>
                   </div>
                 </div>
@@ -445,7 +473,8 @@ export default function CashierClosingPage() {
               </div>
 
               <p className="mt-2 text-sm text-zinc-500">
-                Cargá saldos por cuenta. Al enviar, el sistema recalcula y te muestra diferencias.
+                Cargá saldos por cuenta. Al enviar, el sistema recalcula y te
+                muestra diferencias.
               </p>
 
               {(error || okMsg) && (
@@ -467,26 +496,22 @@ export default function CashierClosingPage() {
             <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    await loadAll();
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                disabled={busy}
-                loading={busy}
+                onClick={refresh}
+                disabled={busy || refreshing}
+                loading={refreshing}
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-              
+                  Actualizar
                 </span>
               </Button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* TODO: tu resto del componente sigue EXACTAMENTE igual */}
+      {/* Pegá desde acá hacia abajo tal cual lo tenías (yo no lo toqué) */}
 
       <div className="mx-auto max-w-5xl px-4 py-6 pb-28 space-y-6">
         {/* Fecha */}
@@ -506,7 +531,9 @@ export default function CashierClosingPage() {
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-zinc-800">Tip:</span>
-                  <span>Si querés ver “computado” y “diff”, primero enviá el cierre.</span>
+                  <span>
+                    Si querés ver “computado” y “diff”, primero enviá el cierre.
+                  </span>
                 </div>
               </div>
             </div>
@@ -515,10 +542,16 @@ export default function CashierClosingPage() {
 
         {/* Resumen */}
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard title="Declarado" subtitle="Suma de tus inputs" value={moneyARS(declaredTotal)} />
+          <StatCard
+            title="Declarado"
+            subtitle="Suma de tus inputs"
+            value={moneyARS(declaredTotal)}
+          />
           <StatCard
             title="Computado"
-            subtitle={showComputed ? "Desde movimientos" : "Disponible al enviar"}
+            subtitle={
+              showComputed ? "Desde movimientos" : "Disponible al enviar"
+            }
             value={showComputed ? moneyARS(computedTotal) : "—"}
           />
           <StatCard
@@ -526,7 +559,13 @@ export default function CashierClosingPage() {
             subtitle="Declarado - Computado"
             tone={showComputed ? (diffTotal >= 0 ? "good" : "bad") : "default"}
             value={
-              showComputed ? <span className={cn(signColor(diffTotal))}>{moneyARS(diffTotal)}</span> : "—"
+              showComputed ? (
+                <span className={cn(signColor(diffTotal))}>
+                  {moneyARS(diffTotal)}
+                </span>
+              ) : (
+                "—"
+              )
             }
           />
         </div>
@@ -535,7 +574,11 @@ export default function CashierClosingPage() {
         <Card>
           <CardHeader
             title="Saldos por cuenta"
-            subtitle={isLocked ? "LOCKED: solo lectura" : "Cargá los saldos reales al cierre"}
+            subtitle={
+              isLocked
+                ? "LOCKED: solo lectura"
+                : "Cargá los saldos reales al cierre"
+            }
           />
           <CardBody>
             {loading ? (
@@ -550,7 +593,7 @@ export default function CashierClosingPage() {
 
                   const computedVal = computedById.get(a.id) ?? 0;
                   const diffVal = showComputed
-                    ? (diffById.get(a.id) ?? 0)
+                    ? diffById.get(a.id) ?? 0
                     : declaredVal - computedVal;
 
                   return (
@@ -560,8 +603,12 @@ export default function CashierClosingPage() {
                     >
                       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-zinc-900">{a.name}</div>
-                          <div className="mt-0.5 text-xs text-zinc-500">{a.id}</div>
+                          <div className="text-sm font-semibold text-zinc-900">
+                            {a.name}
+                          </div>
+                          <div className="mt-0.5 text-xs text-zinc-500">
+                            {a.id}
+                          </div>
                         </div>
 
                         <div className="grid gap-3 md:grid-cols-3 md:items-end">
@@ -570,7 +617,10 @@ export default function CashierClosingPage() {
                               inputMode="decimal"
                               value={declaredStr}
                               onChange={(e) =>
-                                setDeclaredMap((prev) => ({ ...prev, [a.id]: e.target.value }))
+                                setDeclaredMap((prev) => ({
+                                  ...prev,
+                                  [a.id]: e.target.value,
+                                }))
                               }
                               onFocus={(e) => e.currentTarget.select()}
                               onBlur={() => onBlurFormatAccount(a.id)}
@@ -596,13 +646,20 @@ export default function CashierClosingPage() {
                           <div
                             className={cn(
                               "rounded-xl border px-3 py-2",
-                              showComputed ? pillTone(diffVal) : "border-zinc-200 bg-white text-zinc-700"
+                              showComputed
+                                ? pillTone(diffVal)
+                                : "border-zinc-200 bg-white text-zinc-700"
                             )}
                           >
                             <div className="text-xs font-semibold text-zinc-500">
                               Diff (decl - comp)
                             </div>
-                            <div className={cn("mt-1 text-sm font-extrabold", showComputed && signColor(diffVal))}>
+                            <div
+                              className={cn(
+                                "mt-1 text-sm font-extrabold",
+                                showComputed && signColor(diffVal)
+                              )}
+                            >
                               {showComputed ? moneyARS(diffVal) : "—"}
                             </div>
                           </div>
@@ -632,8 +689,9 @@ export default function CashierClosingPage() {
                   <div>
                     <div className="font-semibold text-zinc-800">Consejo</div>
                     <div>
-                      Guardá borrador durante el día. Cuando termines, <b>Enviar cierre</b> para ver el
-                      computado y las diferencias.
+                      Guardá borrador durante el día. Cuando termines,{" "}
+                      <b>Enviar cierre</b> para ver el computado y las
+                      diferencias.
                     </div>
                   </div>
                 </div>
@@ -647,8 +705,12 @@ export default function CashierClosingPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <div className="border-b border-zinc-100 px-5 py-4">
-                <h2 className="text-lg font-semibold text-zinc-900">Computado (sistema)</h2>
-                <p className="mt-1 text-sm text-zinc-500">Saldo final por cuenta hasta {dateKey}.</p>
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  Computado (sistema)
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Saldo final por cuenta hasta {dateKey}.
+                </p>
               </div>
 
               <div className="overflow-x-auto">
@@ -666,10 +728,15 @@ export default function CashierClosingPage() {
                   <tbody className="divide-y divide-zinc-100">
                     {(closing?.computedBalances || []).map((r, idx) => {
                       const id = r.accountId || "";
-                      const name = id ? (accountNameById.get(id) || id) : "—";
+                      const name = id ? accountNameById.get(id) || id : "—";
                       return (
-                        <tr key={`${id}-${idx}`} className="hover:bg-zinc-50/60">
-                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{name}</td>
+                        <tr
+                          key={`${id}-${idx}`}
+                          className="hover:bg-zinc-50/60"
+                        >
+                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                            {name}
+                          </td>
                           <td className="px-4 py-3 text-right text-sm font-extrabold text-zinc-900">
                             {moneyARS(r.balance)}
                           </td>
@@ -678,7 +745,10 @@ export default function CashierClosingPage() {
                     })}
                     {(closing?.computedBalances || []).length === 0 && (
                       <tr>
-                        <td colSpan={2} className="px-4 py-6 text-sm text-zinc-500">
+                        <td
+                          colSpan={2}
+                          className="px-4 py-6 text-sm text-zinc-500"
+                        >
                           Sin datos computed.
                         </td>
                       </tr>
@@ -690,8 +760,12 @@ export default function CashierClosingPage() {
 
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <div className="border-b border-zinc-100 px-5 py-4">
-                <h2 className="text-lg font-semibold text-zinc-900">Diferencias</h2>
-                <p className="mt-1 text-sm text-zinc-500">Declarado - Computado.</p>
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  Diferencias
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Declarado - Computado.
+                </p>
               </div>
 
               <div className="overflow-x-auto">
@@ -709,15 +783,20 @@ export default function CashierClosingPage() {
                   <tbody className="divide-y divide-zinc-100">
                     {(closing?.diffBalances || []).map((r, idx) => {
                       const id = r.accountId || "";
-                      const name = id ? (accountNameById.get(id) || id) : "—";
+                      const name = id ? accountNameById.get(id) || id : "—";
                       const val = Number(r.balance ?? 0);
                       return (
-                        <tr key={`${id}-${idx}`} className="hover:bg-zinc-50/60">
-                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">{name}</td>
+                        <tr
+                          key={`${id}-${idx}`}
+                          className="hover:bg-zinc-50/60"
+                        >
+                          <td className="px-4 py-3 text-sm font-semibold text-zinc-900">
+                            {name}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <span
                               className={cn(
-                                "inline-flex min-w-[120px] justify-end rounded-full border px-3 py-1 text-sm font-extrabold",
+                                "inline-flex min-w-30 justify-end rounded-full border px-3 py-1 text-sm font-extrabold",
                                 pillTone(val)
                               )}
                             >
@@ -729,7 +808,10 @@ export default function CashierClosingPage() {
                     })}
                     {(closing?.diffBalances || []).length === 0 && (
                       <tr>
-                        <td colSpan={2} className="px-4 py-6 text-sm text-zinc-500">
+                        <td
+                          colSpan={2}
+                          className="px-4 py-6 text-sm text-zinc-500"
+                        >
                           No hay diffs.
                         </td>
                       </tr>
@@ -747,15 +829,26 @@ export default function CashierClosingPage() {
         <div className="mx-auto max-w-5xl px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-zinc-600">
-              <span className="font-semibold text-zinc-900">{moneyARS(declaredTotal)}</span>{" "}
+              <span className="font-semibold text-zinc-900">
+                {moneyARS(declaredTotal)}
+              </span>{" "}
               <span className="text-zinc-400">·</span>{" "}
-              <span className={cn("font-semibold", showComputed ? signColor(diffTotal) : "text-zinc-600")}>
+              <span
+                className={cn(
+                  "font-semibold",
+                  showComputed ? signColor(diffTotal) : "text-zinc-600"
+                )}
+              >
                 {showComputed ? `Diff: ${moneyARS(diffTotal)}` : "Diff: —"}
               </span>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={saveDraft} disabled={busy || loading || isLocked} loading={busy}>
+              <Button
+                onClick={saveDraft}
+                disabled={busy || loading || isLocked}
+                loading={busy}
+              >
                 <span className="inline-flex items-center gap-2">
                   <Save className="h-4 w-4" />
                   Guardar
@@ -774,7 +867,6 @@ export default function CashierClosingPage() {
                 </span>
               </Button>
 
-              {/* Si querés que lock no aparezca en cashier: borrá este botón */}
               <Button
                 variant="danger"
                 onClick={lockClosing}

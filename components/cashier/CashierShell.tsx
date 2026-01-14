@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -27,13 +27,24 @@ export default function CashierShell({
 
   const nav: NavItem[] = [
     { href: "/cashier", label: "Dashboard" },
-    { href: "/cashier/incomes", label: "Ingresos" },
-    { href: "/cashier/expenses", label: "Gastos" },
+    { href: "/cashier/pos", label: "POS" },
+    { href: "/cashier/orders", label: "Ordenes" },
+    { href: "/cashier/cash", label: "Caja" },
     { href: "/cashier/closing", label: "Cierre del día" },
   ];
 
+  const activeLabel = useMemo(() => {
+    const exact = nav.find((n) => pathname === n.href);
+    if (exact) return exact.label;
+
+    const pref = nav
+      .filter((n) => n.href !== "/cashier")
+      .find((n) => pathname.startsWith(n.href));
+    return pref?.label || "Cashier";
+  }, [pathname]);
+
   return (
-    <div className="flex h-screen bg-gradient-to-b from-zinc-50 to-zinc-100">
+    <div className="flex h-screen bg-linear-to-b from-zinc-50 to-zinc-100">
       {/* ================= MOBILE OVERLAY ================= */}
       {open && (
         <div
@@ -45,12 +56,12 @@ export default function CashierShell({
       {/* ================= SIDEBAR ================= */}
       <aside
         className={cx(
-          "fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col bg-[#0f2f26] text-white transition-transform md:static md:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-65 flex-col bg-[#0f2f26] text-white shadow-xl transition-transform md:static md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
         {/* Brand */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+        <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#144336] ring-1 ring-white/20">
             <Image
               src="/logo-white.svg"
@@ -70,8 +81,8 @@ export default function CashierShell({
         </div>
 
         {/* User */}
-        <div className="px-5 py-4 border-b border-white/10">
-          <div className="text-xs text-white/70 truncate">
+        <div className="border-b border-white/10 px-5 py-4">
+          <div className="truncate text-xs text-white/70">
             {user?.email ?? "—"}
           </div>
           <div className="mt-1">
@@ -82,12 +93,11 @@ export default function CashierShell({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {nav.map((item) => {
             const active =
               pathname === item.href ||
-              (item.href !== "/cashier" &&
-                pathname.startsWith(item.href));
+              (item.href !== "/cashier" && pathname.startsWith(item.href));
 
             return (
               <Link
@@ -102,22 +112,21 @@ export default function CashierShell({
                 )}
               >
                 <span>{item.label}</span>
-                {active && (
-                  <span className="text-xs opacity-70">●</span>
-                )}
+                {active && <span className="text-xs opacity-70">●</span>}
               </Link>
             );
           })}
         </nav>
 
         {/* Logout */}
-        <div className="p-4 border-t border-white/10">
+        <div className="border-t border-white/10 p-4">
           <button
             onClick={async () => {
+              setOpen(false);
               await logout();
               window.location.href = "/login";
             }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
           >
             <LogOut className="h-4 w-4" />
             Cerrar sesión
@@ -126,29 +135,30 @@ export default function CashierShell({
       </aside>
 
       {/* ================= MAIN ================= */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
+      <div className="min-w-0 flex-1 overflow-y-auto">
         {/* Mobile top bar */}
         <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 md:hidden">
           <button
             onClick={() => setOpen((v) => !v)}
             className="rounded-lg border border-zinc-200 p-2"
+            type="button"
+            aria-label={open ? "Cerrar menú" : "Abrir menú"}
           >
-            {open ? (
-              <X className="h-5 w-5" />
-            ) : (
-              <Menu className="h-5 w-5" />
-            )}
+            {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
 
-          <div className="text-sm font-semibold text-zinc-900">
-            Cashier
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-zinc-900">
+              {activeLabel}
+            </div>
+            <div className="truncate text-xs text-zinc-500">
+              {user?.email ?? "—"}
+            </div>
           </div>
         </div>
 
         {/* Content */}
-        <main className="mx-auto max-w-7xl px-6 py-6">
-          {children}
-        </main>
+        <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
       </div>
     </div>
   );
