@@ -33,9 +33,12 @@ import {
 import type { OrderPaidMeta, OrderRow } from "@/lib/adminOrders/types";
 
 /* =============================================================================
- * Page: Admin Orders (UX/UI improved)
- * - Better mobile: Filters Drawer + Cards list + sticky bottom actions
- * - Desktop: Table as before
+ * Page: Admin Orders (POS-aligned)
+ * - Single fetch effect (no triple load)
+ * - Paid map optimized (only when needed)
+ * - POS-ish mobile cards (compact, totals highlighted)
+ * - Chips for active filters (quick clear)
+ * - Desktop: still table, but tighter & more POS-like
  * ========================================================================== */
 
 const STATUS_TABS = [
@@ -48,7 +51,6 @@ const STATUS_TABS = [
 ];
 
 function isoDate(d: Date) {
-  // YYYY-MM-DD
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const da = String(d.getDate()).padStart(2, "0");
@@ -56,8 +58,7 @@ function isoDate(d: Date) {
 }
 
 /* =============================================================================
- * Minimal Drawer (no deps)
- * - Bottom sheet on mobile
+ * Minimal Drawer (no deps) - Bottom sheet on mobile
  * ========================================================================== */
 function Drawer({
   open,
@@ -145,6 +146,36 @@ function SkeletonRow() {
   );
 }
 
+function TopBar({
+  title,
+  subtitle,
+  leftMeta,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  leftMeta?: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:p-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-900 md:text-2xl">
+            {title}
+          </h1>
+          {subtitle ? (
+            <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>
+          ) : null}
+          {leftMeta ? <div className="mt-3">{leftMeta}</div> : null}
+        </div>
+
+        {right ? <div className="flex flex-wrap gap-2">{right}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminOrdersPage() {
   const { getAccessToken, user } = useAuth();
   const roles = (user?.roles ?? []).map((r: any) => String(r).toUpperCase());
@@ -173,11 +204,14 @@ export default function AdminOrdersPage() {
   // Drawer: filters (mobile)
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  async function loadSalesPaidMap() {
+  const busyOrLoading = busy || loading;
+
+  // ---- Paid map (optimized) ----
+  async function loadSalesPaidMap(days = 14) {
     try {
       const to = new Date();
       const from = new Date();
-      from.setDate(from.getDate() - 30);
+      from.setDate(from.getDate() - days);
 
       const qs = new URLSearchParams();
       qs.set("limit", "500");
@@ -206,11 +240,9 @@ export default function AdminOrdersPage() {
         if (!prev) {
           map[orderId] = { saleId, saleStatus, paidAt };
         } else {
-          const prevPaid =
-            String(prev.saleStatus ?? "").toUpperCase() === "PAID";
+          const prevPaid = String(prev.saleStatus ?? "").toUpperCase() === "PAID";
           const nowPaid = String(saleStatus ?? "").toUpperCase() === "PAID";
-          if (!prevPaid && nowPaid)
-            map[orderId] = { saleId, saleStatus, paidAt };
+          if (!prevPaid && nowPaid) map[orderId] = { saleId, saleStatus, paidAt };
         }
       }
 
@@ -220,6 +252,7 @@ export default function AdminOrdersPage() {
     }
   }
 
+  // ---- Orders ----
   async function loadOrders() {
     setErr(null);
     setLoading(true);
@@ -257,12 +290,14 @@ export default function AdminOrdersPage() {
 
       setOrders(norm);
 
-      // paidMap en paralelo
-      loadSalesPaidMap().catch(() => {});
+      // paid map only if there are orders
+      if (norm.length) loadSalesPaidMap(14).catch(() => {});
+      else setPaidMap({});
     } catch (e: any) {
       const msg = String(e?.message || "Error cargando pedidos");
       setErr(looksForbidden(msg) ? "Sin permisos." : msg);
       setOrders([]);
+      setPaidMap({});
     } finally {
       setLoading(false);
     }
@@ -275,6 +310,8 @@ export default function AdminOrdersPage() {
 
     try {
       await loadOrders();
+      // loadOrders already triggers paidMap; but on manual refresh we ensure it:
+      await loadSalesPaidMap(14);
       setOk("Actualizado ✔");
       setTimeout(() => setOk(null), 1200);
     } catch (e: any) {
@@ -284,25 +321,23 @@ export default function AdminOrdersPage() {
     }
   }
 
+  // ---- SINGLE effect for all filters (debounced) ----
+  const firstLoadRef = useRef(true);
   useEffect(() => {
-    loadOrders().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!canUse) return;
 
-  useEffect(() => {
-    loadOrders().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, fulfillment, limit]);
+    if (firstLoadRef.current) {
+      firstLoadRef.current = false;
+      loadOrders().catch(() => {});
+      return;
+    }
 
-  // búsqueda con debounce
-  const dqRef = useRef<any>(null);
-  useEffect(() => {
-    if (dqRef.current) clearTimeout(dqRef.current);
-    dqRef.current = setTimeout(() => loadOrders().catch(() => {}), 300);
-    return () => dqRef.current && clearTimeout(dqRef.current);
+    const t = setTimeout(() => loadOrders().catch(() => {}), 300);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [status, fulfillment, limit, q, canUse]);
 
+  // ---- Derived ----
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
     for (const o of orders) {
@@ -322,40 +357,73 @@ export default function AdminOrdersPage() {
     if (status) n++;
     if (fulfillment) n++;
     if (q.trim()) n++;
-    // limit no cuenta como filtro
     return n;
   }, [status, fulfillment, q]);
 
-  const busyOrLoading = busy || loading;
+  const activeChips = useMemo(() => {
+    const chips: { key: string; label: string; onClear: () => void }[] = [];
+    if (status)
+      chips.push({
+        key: "status",
+        label: `Estado: ${activeTabLabel}`,
+        onClear: () => setStatus(""),
+      });
+    if (fulfillment) {
+      const meta = fulfillmentMeta(fulfillment as any);
+      chips.push({
+        key: "fulfillment",
+        label: `Tipo: ${meta?.label || fulfillment}`,
+        onClear: () => setFulfillment(""),
+      });
+    }
+    if (q.trim())
+      chips.push({
+        key: "q",
+        label: `Buscar: ${q.trim()}`,
+        onClear: () => setQ(""),
+      });
+    return chips;
+  }, [status, fulfillment, q, activeTabLabel]);
+
+  const totals = useMemo(() => {
+    const total = orders.reduce((acc, o) => acc + (typeof o.total === "number" ? o.total : 0), 0);
+    return { total };
+  }, [orders]);
+
+  // ---- Handlers ----
+  function openOrder(id: string) {
+    setSelectedOrderId(id);
+    setDrawerOpen(true);
+  }
 
   return (
     <AdminProtected>
       <div className="space-y-4 md:space-y-6">
-        {/* Header */}
-        <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight text-zinc-900 md:text-2xl">
-                Pedidos
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500">
-                Abrí un pedido para ver/editar/cobrar desde el drawer.
-              </p>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-600">
-                <span className="inline-flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4" />
-                  Total: <b>{orders.length}</b>
+        {/* Header (POS-aligned, compact) */}
+        <TopBar
+          title="Pedidos"
+          subtitle="Abrí un pedido para ver / editar / cobrar (drawer)."
+          leftMeta={
+            <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-600">
+              <span className="inline-flex items-center gap-2">
+                <ClipboardList className="h-4 w-4" />
+                Total: <b className="text-zinc-900">{orders.length}</b>
+              </span>
+              <span className="hidden text-zinc-300 md:inline">•</span>
+              <span className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
+                Estado: <span className="text-zinc-800">{activeTabLabel}</span>
+              </span>
+              <span className="hidden text-zinc-300 md:inline">•</span>
+              <span className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
+                Total $:{" "}
+                <span className="text-emerald-700 font-extrabold">
+                  {moneyARS(totals.total)}
                 </span>
-                <span className="hidden text-zinc-300 md:inline">•</span>
-                <span className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
-                  Estado:{" "}
-                  <span className="text-zinc-800">{activeTabLabel}</span>
-                </span>
-              </div>
+              </span>
             </div>
-
-            <div className="flex flex-wrap gap-2">
+          }
+          right={
+            <>
               <Button
                 variant="secondary"
                 onClick={() => setFiltersOpen(true)}
@@ -379,30 +447,46 @@ export default function AdminOrdersPage() {
               >
                 <span className="inline-flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-                  Actualizar{" "}
+                  Actualizar
                 </span>
               </Button>
-            </div>
+
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setStatus("");
+                  setFulfillment("");
+                  setQ("");
+                  setLimit(50);
+                }}
+                disabled={!canUse || busyOrLoading}
+                className="hidden md:inline-flex"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <XCircle className="h-4 w-4" />
+                  Limpiar
+                </span>
+              </Button>
+            </>
+          }
+        />
+
+        {(err || ok) && (
+          <div className="grid gap-2">
+            {err && <Notice tone="error">{err}</Notice>}
+            {!err && ok && <Notice tone="ok">{ok}</Notice>}
           </div>
+        )}
 
-          {(err || ok) && (
-            <div className="mt-4 grid gap-2">
-              {err && <Notice tone="error">{err}</Notice>}
-              {!err && ok && <Notice tone="ok">{ok}</Notice>}
-            </div>
-          )}
+        {!canUse && (
+          <Notice tone="warn">
+            Tu usuario no tiene roles para gestionar pedidos (ADMIN/MANAGER/CASHIER).
+          </Notice>
+        )}
 
-          {!canUse && (
-            <div className="mt-4">
-              <Notice tone="warn">
-                Tu usuario no tiene roles para gestionar pedidos
-                (ADMIN/MANAGER/CASHIER).
-              </Notice>
-            </div>
-          )}
-
-          {/* Tabs (scrollable on mobile) */}
-          <div className="mt-5 -mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+        {/* Tabs */}
+        <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:p-6">
+          <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
             <div className="flex w-max gap-2 md:flex-wrap md:w-auto">
               {STATUS_TABS.map((t) => {
                 const active = status === t.key;
@@ -424,9 +508,7 @@ export default function AdminOrdersPage() {
                     )}
                   >
                     {t.label}{" "}
-                    <span
-                      className={cn(active ? "text-white/80" : "text-zinc-400")}
-                    >
+                    <span className={cn(active ? "text-white/80" : "text-zinc-400")}>
                       {count}
                     </span>
                   </button>
@@ -435,7 +517,27 @@ export default function AdminOrdersPage() {
             </div>
           </div>
 
-          {/* Desktop Filters */}
+          {/* Chips (quick clear) */}
+          {activeChips.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {activeChips.map((c) => (
+                <button
+                  key={c.key}
+                  onClick={c.onClear}
+                  disabled={!canUse}
+                  className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                >
+                  {c.label} <span className="ml-1 text-zinc-400">×</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 text-xs text-zinc-500">
+              Tip: usá los tabs y filtros para encontrar pedidos rápido.
+            </div>
+          )}
+
+          {/* Desktop Filters (POS-like compact) */}
           <div className="mt-5 hidden gap-3 md:grid md:grid-cols-4">
             <Field label="Fulfillment">
               <Select
@@ -477,26 +579,14 @@ export default function AdminOrdersPage() {
             </Field>
 
             <div className="flex items-end justify-end">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setStatus("");
-                  setFulfillment("");
-                  setQ("");
-                  setLimit(50);
-                }}
-                disabled={!canUse || busyOrLoading}
-              >
-                <span className="inline-flex items-center gap-2">
-                  <XCircle className="h-4 w-4" />
-                  Limpiar
-                </span>
-              </Button>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold text-zinc-600">
+                {busyOrLoading ? "Cargando…" : "Listo"}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* LIST: Mobile cards */}
+        {/* LIST: Mobile cards (POS-ish) */}
         <div className="md:hidden space-y-3">
           {busyOrLoading && (
             <>
@@ -526,20 +616,17 @@ export default function AdminOrdersPage() {
               return (
                 <button
                   key={o.id}
-                  onClick={() => {
-                    setSelectedOrderId(o.id);
-                    setDrawerOpen(true);
-                  }}
+                  onClick={() => openOrder(o.id)}
                   className="w-full text-left"
                   disabled={!canUse}
                 >
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:bg-zinc-50 disabled:opacity-60">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-zinc-500">
+                        <div className="text-[11px] font-semibold text-zinc-500">
                           {fmtDateTime(o.createdAt)}
                         </div>
-                        <div className="mt-1 truncate text-sm font-semibold text-zinc-900">
+                        <div className="mt-1 truncate text-sm font-extrabold text-zinc-900">
                           {customer}
                         </div>
                         {o.customerSnapshot?.addressLine1 ? (
@@ -550,11 +637,12 @@ export default function AdminOrdersPage() {
                       </div>
 
                       <div className="shrink-0 text-right">
-                        <div className="text-sm font-bold text-zinc-900">
+                        <div className="text-base font-extrabold text-emerald-700">
                           {o.total != null ? moneyARS(o.total) : "—"}
                         </div>
-                        <div className="mt-1 text-xs text-zinc-500">
-                          Items: {o.itemsCount ?? "—"}
+                        <div className="mt-1 text-[11px] text-zinc-500">
+                          Items:{" "}
+                          <b className="text-zinc-700">{o.itemsCount ?? "—"}</b>
                         </div>
                       </div>
                     </div>
@@ -562,7 +650,7 @@ export default function AdminOrdersPage() {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span
                         className={cn(
-                          "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
+                          "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold",
                           statusPillClass(o.status)
                         )}
                       >
@@ -571,25 +659,29 @@ export default function AdminOrdersPage() {
 
                       <span
                         className={cn(
-                          "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold",
+                          "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
                           salePillClass(payStatus)
                         )}
                         title={
-                          pm?.paidAt ? `Pagado: ${fmtDateTime(pm.paidAt)}` : ""
+                          pm?.paidAt
+                            ? `Venta: ${pm.saleStatus} · Pagado: ${fmtDateTime(pm.paidAt)} · SaleId: ${pm.saleId}`
+                            : pm?.saleStatus
+                            ? `Venta: ${pm.saleStatus} · SaleId: ${pm.saleId}`
+                            : "Sin venta"
                         }
                       >
                         <BadgeCheck className="h-4 w-4" />
                         {payStatus ? String(payStatus) : "SIN VENTA"}
                       </span>
 
-                      <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                      <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
                         {meta.icon}
                         {meta.label}
                       </span>
                     </div>
 
                     {o.note ? (
-                      <div className="mt-3 line-clamp-2 text-xs text-zinc-600">
+                      <div className="mt-3 line-clamp-2 text-[11px] text-zinc-600">
                         {o.note}
                       </div>
                     ) : null}
@@ -603,40 +695,40 @@ export default function AdminOrdersPage() {
           </div>
         </div>
 
-        {/* LIST: Desktop table */}
+        {/* LIST: Desktop table (tight, POS-like) */}
         <div className="hidden md:block">
           <Card>
             <CardHeader
               title="Listado"
-              subtitle="Click en un pedido para ver/editar/cobrar"
+              subtitle="Click en un pedido para ver / editar / cobrar"
             />
             <CardBody>
               <div className="overflow-x-auto rounded-2xl border border-zinc-200">
                 <table className="min-w-full">
                   <thead className="bg-zinc-50">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Fecha
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Estado
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Pago
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Tipo
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Cliente
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Items
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Total
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-zinc-500">
                         Nota
                       </th>
                     </tr>
@@ -645,10 +737,7 @@ export default function AdminOrdersPage() {
                   <tbody className="divide-y divide-zinc-100">
                     {busyOrLoading && (
                       <tr>
-                        <td
-                          colSpan={8}
-                          className="px-4 py-10 text-sm text-zinc-500"
-                        >
+                        <td colSpan={8} className="px-4 py-10 text-sm text-zinc-500">
                           Cargando…
                         </td>
                       </tr>
@@ -656,10 +745,7 @@ export default function AdminOrdersPage() {
 
                     {!busyOrLoading && orders.length === 0 && (
                       <tr>
-                        <td
-                          colSpan={8}
-                          className="px-4 py-10 text-sm text-zinc-500"
-                        >
+                        <td colSpan={8} className="px-4 py-10 text-sm text-zinc-500">
                           No hay pedidos con estos filtros.
                         </td>
                       </tr>
@@ -680,10 +766,12 @@ export default function AdminOrdersPage() {
                           <tr
                             key={o.id}
                             className="cursor-pointer hover:bg-zinc-50"
-                            onClick={() => {
-                              setSelectedOrderId(o.id);
-                              setDrawerOpen(true);
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") openOrder(o.id);
                             }}
+                            onClick={() => openOrder(o.id)}
                           >
                             <td className="px-4 py-3 text-sm text-zinc-600">
                               {fmtDateTime(o.createdAt)}
@@ -708,8 +796,10 @@ export default function AdminOrdersPage() {
                                 )}
                                 title={
                                   pm?.paidAt
-                                    ? `Pagado: ${fmtDateTime(pm.paidAt)}`
-                                    : ""
+                                    ? `Venta: ${pm.saleStatus} · Pagado: ${fmtDateTime(pm.paidAt)} · SaleId: ${pm.saleId}`
+                                    : pm?.saleStatus
+                                    ? `Venta: ${pm.saleStatus} · SaleId: ${pm.saleId}`
+                                    : "Sin venta"
                                 }
                               >
                                 <BadgeCheck className="h-4 w-4" />
@@ -744,9 +834,7 @@ export default function AdminOrdersPage() {
                             </td>
 
                             <td className="px-4 py-3 text-sm text-zinc-600">
-                              <div className="max-w-85 truncate">
-                                {o.note || "—"}
-                              </div>
+                              <div className="max-w-85 truncate">{o.note || "—"}</div>
                             </td>
                           </tr>
                         );
@@ -756,8 +844,7 @@ export default function AdminOrdersPage() {
               </div>
 
               <div className="mt-3 text-xs text-zinc-500">
-                Tip: si un pedido se paga en efectivo después, abrilo y cobralo
-                desde el panel “Cobro”.
+                Tip: si un pedido se paga en efectivo después, abrilo y cobralo desde el panel “Cobro”.
               </div>
             </CardBody>
           </Card>
@@ -796,11 +883,7 @@ export default function AdminOrdersPage() {
         </div>
 
         {/* Filters Drawer (mobile) */}
-        <Drawer
-          open={filtersOpen}
-          onClose={() => setFiltersOpen(false)}
-          title="Filtros"
-        >
+        <Drawer open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filtros">
           <div className="grid gap-3">
             <Field label="Fulfillment">
               <Select
@@ -869,8 +952,7 @@ export default function AdminOrdersPage() {
             </div>
 
             <div className="pt-2 text-xs text-zinc-500">
-              Tip: los tabs de estado ya filtran arriba (deslizá horizontal si
-              no entran).
+              Tip: los tabs de estado ya filtran arriba (deslizá horizontal si no entran).
             </div>
           </div>
         </Drawer>
@@ -883,7 +965,7 @@ export default function AdminOrdersPage() {
           onClose={() => setDrawerOpen(false)}
           onChanged={async () => {
             await loadOrders();
-            await loadSalesPaidMap();
+            await loadSalesPaidMap(14);
           }}
         />
       </div>

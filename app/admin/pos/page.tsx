@@ -31,11 +31,6 @@ import {
   postPosCheckout,
 } from "@/lib/adminPos/api";
 
-import PosHeader from "@/components/admin/pos/PosHeader";
-import OrderCard from "@/components/admin/pos/OrderCard";
-import ProductsCard from "@/components/admin/pos/ProductsCard";
-import CartCard from "@/components/admin/pos/CartCard";
-import PaymentsCard from "@/components/admin/pos/PaymentsCard";
 import SalesTable from "@/components/admin/pos/SalesTable";
 import VoidSaleModal from "@/components/admin/pos/VoidSaleModal";
 import { getUnitPrice } from "@/lib/adminPos/ui";
@@ -85,19 +80,12 @@ function Drawer({
   if (!open) return null;
 
   const panelPos =
-    side === "bottom"
-      ? "left-0 right-0 bottom-0"
-      : "right-0 top-0 bottom-0";
+    side === "bottom" ? "left-0 right-0 bottom-0" : "right-0 top-0 bottom-0";
 
-  const panelShape =
-    side === "bottom"
-      ? "rounded-t-3xl"
-      : "rounded-l-3xl";
+  const panelShape = side === "bottom" ? "rounded-t-3xl" : "rounded-l-3xl";
 
   const panelSize =
-    side === "bottom"
-      ? "max-h-[85vh]"
-      : `h-full w-full ${widthClass}`;
+    side === "bottom" ? "max-h-[85vh]" : `h-full w-full ${widthClass}`;
 
   return (
     <div className="fixed inset-0 z-60">
@@ -116,7 +104,9 @@ function Drawer({
           panelPos,
           panelShape,
           panelSize,
-          side === "bottom" ? "border-t border-zinc-200" : "border-l border-zinc-200"
+          side === "bottom"
+            ? "border-t border-zinc-200"
+            : "border-l border-zinc-200"
         )}
         role="dialog"
         aria-modal="true"
@@ -127,7 +117,9 @@ function Drawer({
             {title ? (
               <h3 className="text-sm font-semibold text-zinc-900">{title}</h3>
             ) : (
-              <span className="text-sm font-semibold text-zinc-900">Detalle</span>
+              <span className="text-sm font-semibold text-zinc-900">
+                Detalle
+              </span>
             )}
           </div>
           <button
@@ -205,7 +197,9 @@ function KpiBar({
             : "bg-zinc-50"
         )}
       >
-        <div className="text-[11px] font-semibold text-zinc-500">Diferencia</div>
+        <div className="text-[11px] font-semibold text-zinc-500">
+          Diferencia
+        </div>
         <div
           className={cn(
             "text-sm font-bold",
@@ -243,7 +237,9 @@ export default function AdminPosPage() {
   const { getAccessToken, user } = useAuth();
   const roles = (user?.roles ?? []).map((r: any) => String(r).toUpperCase());
   const canUsePos =
-    roles.includes("ADMIN") || roles.includes("MANAGER") || roles.includes("CASHIER");
+    roles.includes("ADMIN") ||
+    roles.includes("MANAGER") ||
+    roles.includes("CASHIER");
 
   // Filters
   const [dateKey, setDateKey] = useState(todayKeyArgentina());
@@ -278,7 +274,10 @@ export default function AdminPosPage() {
     () => payments.reduce((acc, p) => acc + num(p.amount), 0),
     [payments]
   );
-  const diff = useMemo(() => paymentsTotal - cartTotal, [paymentsTotal, cartTotal]);
+  const diff = useMemo(
+    () => paymentsTotal - cartTotal,
+    [paymentsTotal, cartTotal]
+  );
 
   // Optional: keep existing customerId (DB customer)
   const [customerId, setCustomerId] = useState<string>("");
@@ -309,7 +308,9 @@ export default function AdminPosPage() {
   // Void modal
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidSaleId, setVoidSaleId] = useState<string | null>(null);
-  const [voidDefaultDateKey, setVoidDefaultDateKey] = useState<string | null>(null);
+  const [voidDefaultDateKey, setVoidDefaultDateKey] = useState<string | null>(
+    null
+  );
 
   // Drawers (mobile UX)
   const [drawerProducts, setDrawerProducts] = useState(false);
@@ -446,7 +447,9 @@ export default function AdminPosPage() {
   function setCartNote(productId: string, noteVal: string) {
     setCart((prev) =>
       prev.map((it) =>
-        it.productId === productId ? { ...it, note: noteVal?.trim() || null } : it
+        it.productId === productId
+          ? { ...it, note: noteVal?.trim() || null }
+          : it
       )
     );
   }
@@ -475,7 +478,10 @@ export default function AdminPosPage() {
   // ---------------- Payments actions ----------------
 
   function addPaymentLine() {
-    setPayments((prev) => [...prev, { method: "TRANSFER", amount: 0, note: null }]);
+    setPayments((prev) => [
+      ...prev,
+      { method: "TRANSFER", amount: 0, note: null },
+    ]);
   }
 
   function removePaymentLine(ix: number) {
@@ -531,15 +537,27 @@ export default function AdminPosPage() {
     if (paymentsTotal < cartTotal) return false;
     if (deliveryNeedsData) return false;
     return true;
-  }, [canUsePos, cart.length, payments.length, cartTotal, paymentsTotal, deliveryNeedsData]);
+  }, [
+    canUsePos,
+    cart.length,
+    payments.length,
+    cartTotal,
+    paymentsTotal,
+    deliveryNeedsData,
+  ]);
 
   const posStatus = useMemo(() => {
     if (!canUsePos) return { kind: "blocked" as const, label: "Sin permisos" };
-    if (!cart.length) return { kind: "idle" as const, label: "Agregá productos" };
-    if (deliveryNeedsData) return { kind: "warn" as const, label: "Faltan datos delivery" };
-    if (paymentsTotal <= 0) return { kind: "warn" as const, label: "Ingresá un pago" };
-    if (paymentsTotal < cartTotal) return { kind: "warn" as const, label: "Falta dinero" };
-    if (paymentsTotal === cartTotal) return { kind: "ok" as const, label: "Listo para cobrar" };
+    if (!cart.length)
+      return { kind: "idle" as const, label: "Agregá productos" };
+    if (deliveryNeedsData)
+      return { kind: "warn" as const, label: "Faltan datos delivery" };
+    if (paymentsTotal <= 0)
+      return { kind: "warn" as const, label: "Ingresá un pago" };
+    if (paymentsTotal < cartTotal)
+      return { kind: "warn" as const, label: "Falta dinero" };
+    if (paymentsTotal === cartTotal)
+      return { kind: "ok" as const, label: "Listo para cobrar" };
     return { kind: "change" as const, label: "Listo (con vuelto)" };
   }, [canUsePos, cart.length, deliveryNeedsData, paymentsTotal, cartTotal]);
 
@@ -564,8 +582,10 @@ export default function AdminPosPage() {
       ? {
           name: String(customerSnapshot.name ?? "").trim() || null,
           phone: String(customerSnapshot.phone ?? "").trim() || null,
-          addressLine1: String(customerSnapshot.addressLine1 ?? "").trim() || null,
-          addressLine2: String(customerSnapshot.addressLine2 ?? "").trim() || null,
+          addressLine1:
+            String(customerSnapshot.addressLine1 ?? "").trim() || null,
+          addressLine2:
+            String(customerSnapshot.addressLine2 ?? "").trim() || null,
           notes: String(customerSnapshot.notes ?? "").trim() || null,
         }
       : {
@@ -604,8 +624,12 @@ export default function AdminPosPage() {
         })),
       });
 
-      const orderId = String(res?.id ?? res?._id ?? res?.order?.id ?? res?.order?._id ?? "");
-      setOk(orderId ? `Pedido creado ✔ (Order: ${orderId})` : "Pedido creado ✔");
+      const orderId = String(
+        res?.id ?? res?._id ?? res?.order?.id ?? res?.order?._id ?? ""
+      );
+      setOk(
+        orderId ? `Pedido creado ✔ (Order: ${orderId})` : "Pedido creado ✔"
+      );
       setTimeout(() => setOk(null), 1400);
 
       clearCart();
@@ -631,7 +655,11 @@ export default function AdminPosPage() {
     }
 
     const payloadPayments = payments
-      .map((p) => ({ method: p.method, amount: num(p.amount), note: p.note ?? null }))
+      .map((p) => ({
+        method: p.method,
+        amount: num(p.amount),
+        note: p.note ?? null,
+      }))
       .filter((p) => p.amount > 0);
 
     if (!payloadPayments.length) {
@@ -649,13 +677,21 @@ export default function AdminPosPage() {
         customerId: customerId?.trim() ? customerId.trim() : null,
         customerSnapshot: snapshot,
         note: note?.trim() ? note.trim() : null,
-        items: cart.map((it) => ({ productId: it.productId, qty: num(it.qty), note: it.note ?? null })),
+        items: cart.map((it) => ({
+          productId: it.productId,
+          qty: num(it.qty),
+          note: it.note ?? null,
+        })),
         payments: payloadPayments,
         concept: concept?.trim() ? concept.trim() : "VENTA POS",
         categoryId: categoryId || null,
       });
 
-      setOk(`Venta creada ✔ (Sale: ${String(res?.sale?.id ?? res?.sale?._id ?? "OK")})`);
+      setOk(
+        `Venta creada ✔ (Sale: ${String(
+          res?.sale?.id ?? res?.sale?._id ?? "OK"
+        )})`
+      );
       setTimeout(() => setOk(null), 1600);
 
       clearCart();
@@ -739,368 +775,384 @@ export default function AdminPosPage() {
 
   return (
     <AdminProtected>
-      <div className="space-y-4">
-        {/* Header stays */}
-        <PosHeader
-          dateKey={dateKey}
-          setDateKey={setDateKey}
-          cartTotal={cartTotal}
-          paymentsTotal={paymentsTotal}
-          diff={diff}
-          fulfillment={fulfillment}
-          busy={busy}
-          loading={loading}
-          canUsePos={canUsePos}
-          err={err}
-          ok={ok}
-          onRefresh={refreshAll}
-        />
+      <div className="min-h-dvh bg-zinc-50">
+        {/* Top bar (verde como el mock) */}
+        <div className="sticky top-0 z-40 h-14 bg-emerald-600 shadow-sm">
+          <div className="mx-auto flex h-full max-w-350 items-center justify-between px-4">
+            <div className="flex items-center gap-3">
+              <button
+                className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/20"
+                onClick={refreshAll}
+                disabled={busyHard}
+              >
+                Refresh
+              </button>
 
-        {/* Mobile KPI + quick actions */}
-        <div className="lg:hidden space-y-3">
-          <KpiBar
-            cartTotal={cartTotal}
-            paymentsTotal={paymentsTotal}
-            diff={diff}
-            canCheckout={canCheckout}
-            deliveryNeedsData={deliveryNeedsData}
-          />
+              <div className="hidden md:block text-sm font-semibold text-white/90">
+                POS
+              </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
-              disabled={!canUsePos || busyHard}
-              onClick={() => setDrawerProducts(true)}
-            >
-              Productos (F2)
-            </button>
-            <button
-              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
-              disabled={!canUsePos || busyHard}
-              onClick={() => setDrawerCart(true)}
-            >
-              Carrito ({cart.length})
-            </button>
-            <button
-              className={cn(
-                "rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-60",
-                posStatus.kind === "ok" || posStatus.kind === "change"
-                  ? "bg-zinc-900 text-white hover:bg-zinc-800"
-                  : "border border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
-              )}
-              disabled={!canUsePos || busyHard || (!cart.length && posStatus.kind !== "warn")}
-              onClick={() => setDrawerPayments(true)}
-            >
-              Cobrar (F8)
-            </button>
-            <button
-              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60"
-              disabled={!canUsePos || busyHard}
-              onClick={() => setDrawerOrder(true)}
-            >
-              Cliente/Entrega
-            </button>
-          </div>
-
-          {/* Sales table compact on mobile */}
-          <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <div className="border-b border-zinc-100 px-4 py-3">
-              <div className="text-sm font-semibold text-zinc-900">Ventas del día</div>
-              <div className="text-xs text-zinc-500">Anular desde la tabla</div>
+              <div className="hidden lg:block text-xs text-white/80">
+                {ok ? ok : err ? err : "Listo"}
+              </div>
             </div>
-            <div className="p-2">
-              <SalesTable
-                sales={sales}
-                loadingSales={loadingSales}
-                loading={loading}
-                busy={busy}
-                dateKey={dateKey}
-                onVoidClick={(s) => {
-                  const voided = s.status === "VOIDED";
-                  if (voided) return;
-                  setVoidSaleId(s.id);
-                  setVoidDefaultDateKey(s.paidDateKey || dateKey);
-                  setVoidOpen(true);
+
+            <div className="flex items-center gap-2">
+              <div className="hidden md:block rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+                {dateKey}
+              </div>
+              <button
+                className="rounded-lg bg-white px-3 py-1.5 text-sm font-extrabold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                onClick={() => {
+                  if (!q) return;
+                  // fuerza búsqueda inmediata
+                  searchProducts(q).catch(() => {});
                 }}
-              />
+                disabled={busyHard}
+              >
+                Buscar
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Desktop layout (same but tighter spacing / better grid) */}
-        <div className="hidden lg:block space-y-6">
-          <OrderCard
-            canUsePos={canUsePos}
-            busy={busyHard}
-            fulfillment={fulfillment}
-            setFulfillment={setFulfillment}
-            customerSnapshot={customerSnapshot}
-            setCustomerSnapshot={setCustomerSnapshot}
-            deliveryNeedsData={deliveryNeedsData}
-            customerId={customerId}
-            setCustomerId={setCustomerId}
-          />
+        {/* Body */}
+        <div className="mx-auto max-w-350 px-4 py-4">
+          <div className="grid h-[calc(100dvh-120px)] grid-cols-[1fr_390px] gap-4">
+            {/* LEFT: catálogo */}
+            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              {/* barra superior catálogo */}
+              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3">
+                <button className="text-xs font-semibold text-emerald-700 hover:text-emerald-800">
+                  + ADD NEW ITEM
+                </button>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <ProductsCard
-              canUsePos={canUsePos}
-              busy={busyHard}
-              q={q}
-              setQ={setQ}
-              products={products}
-              loadingProducts={loadingProducts}
-              onSearchClick={() => searchProducts(q)}
-              onSearchKeyDown={onSearchKeyDown}
-              onAddToCart={addToCart}
-            />
+                <div className="ml-auto flex w-105 items-center gap-2">
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    onKeyDown={onSearchKeyDown}
+                    placeholder="Search items here..."
+                    className="h-10 w-full rounded-full border border-zinc-200 px-4 text-sm outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    className="grid h-10 w-10 place-items-center rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+                    onClick={() => searchProducts(q).catch(() => {})}
+                    disabled={busyHard}
+                    title="Buscar"
+                  >
+                    🔍
+                  </button>
+                </div>
+              </div>
 
-            <CartCard
-              canUsePos={canUsePos}
-              busy={busyHard}
-              cart={cart}
-              cartTotal={cartTotal}
-              onRemoveItem={removeCartItem}
-              onSetQty={setCartQty}
-              onSetNote={setCartNote}
-              onClear={clearCart}
+              {/* grilla */}
+              <div className="flex-1 overflow-auto p-4">
+                {loadingProducts ? (
+                  <div className="text-sm text-zinc-500">Cargando…</div>
+                ) : !products.length ? (
+                  <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+                    No hay productos para mostrar.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-5 gap-4">
+                    {products.map((p) => {
+                      const price = getUnitPrice(p);
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => addToCart(p)}
+                          className="group rounded-xl border border-zinc-200 bg-white p-3 text-left hover:shadow-md"
+                          disabled={busyHard}
+                        >
+                          <div className="aspect-square w-full rounded-lg bg-zinc-50">
+                            {/* si tenés imágenes después lo conectamos */}
+                            <div className="grid h-full w-full place-items-center text-zinc-300">
+                              IMG
+                            </div>
+                          </div>
+
+                          <div className="mt-2 line-clamp-2 text-sm font-semibold text-zinc-900">
+                            {p.name}
+                          </div>
+                          <div className="mt-1 text-sm font-extrabold text-emerald-700">
+                            {price.toLocaleString("es-AR", {
+                              style: "currency",
+                              currency: "ARS",
+                            })}
+                          </div>
+
+                          <div className="mt-2 text-[11px] font-semibold text-zinc-400 opacity-0 group-hover:opacity-100">
+                            Click para agregar
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* barra de categorías como mock (por ahora dummy) */}
+              <div className="border-t border-zinc-100 bg-zinc-50 px-4 py-3">
+                <div className="grid grid-cols-5 gap-2">
+                  {["Coffee", "Beverages", "BBQ", "Snacks", "Deserts"].map(
+                    (t) => (
+                      <button
+                        key={t}
+                        className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                        disabled={busyHard}
+                      >
+                        {t}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: ticket */}
+            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              <div className="border-b border-zinc-100 px-4 py-3">
+                <div className="text-sm font-bold text-zinc-900">Checkout</div>
+                <div className="text-xs text-zinc-500">
+                  {paymentsTotal <= 0
+                    ? "Ingresá pagos"
+                    : diff < 0
+                    ? `Falta ${Math.abs(diff).toLocaleString("es-AR", {
+                        style: "currency",
+                        currency: "ARS",
+                      })}`
+                    : diff === 0
+                    ? "Exacto"
+                    : `Vuelto ${Math.abs(diff).toLocaleString("es-AR", {
+                        style: "currency",
+                        currency: "ARS",
+                      })}`}
+                </div>
+              </div>
+
+              {/* Datos cliente arriba del ticket */}
+              <div className="border-b border-zinc-100 px-4 py-3">
+                <div className="grid gap-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["TAKEAWAY", "DELIVERY", "DINEIN"] as Fulfillment[]).map(
+                      (k) => (
+                        <button
+                          key={k}
+                          onClick={() => setFulfillment(k)}
+                          disabled={!canUsePos || busyHard}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-xs font-semibold",
+                            fulfillment === k
+                              ? "border-emerald-600 bg-emerald-600 text-white"
+                              : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50",
+                            (!canUsePos || busyHard) && "opacity-60"
+                          )}
+                        >
+                          {k === "TAKEAWAY"
+                            ? "Takeaway"
+                            : k === "DELIVERY"
+                            ? "Delivery"
+                            : "Dine in"}
+                        </button>
+                      )
+                    )}
+                  </div>
+
+                  <input
+                    value={customerId}
+                    onChange={(e) => setCustomerId(e.target.value)}
+                    placeholder="Cliente ID (opcional)"
+                    className="h-9 rounded-xl border border-zinc-200 px-3 text-sm outline-none focus:border-emerald-400"
+                    disabled={!canUsePos || busyHard}
+                  />
+
+                  <input
+                    value={customerSnapshot.name ?? ""}
+                    onChange={(e) =>
+                      setCustomerSnapshot({
+                        ...customerSnapshot,
+                        name: e.target.value,
+                      })
+                    }
+                    placeholder="Nombre"
+                    className={cn(
+                      "h-9 rounded-xl border px-3 text-sm outline-none focus:border-emerald-400",
+                      deliveryNeedsData &&
+                        !String(customerSnapshot.name ?? "").trim()
+                        ? "border-amber-300"
+                        : "border-zinc-200"
+                    )}
+                    disabled={!canUsePos || busyHard}
+                  />
+
+                  {fulfillment === "DELIVERY" && (
+                    <input
+                      value={customerSnapshot.addressLine1 ?? ""}
+                      onChange={(e) =>
+                        setCustomerSnapshot({
+                          ...customerSnapshot,
+                          addressLine1: e.target.value,
+                        })
+                      }
+                      placeholder="Dirección"
+                      className={cn(
+                        "h-9 rounded-xl border px-3 text-sm outline-none focus:border-emerald-400",
+                        deliveryNeedsData &&
+                          !String(customerSnapshot.addressLine1 ?? "").trim()
+                          ? "border-amber-300"
+                          : "border-zinc-200"
+                      )}
+                      disabled={!canUsePos || busyHard}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Ticket items */}
+              <div className="flex-1 overflow-auto px-4 py-3">
+                <div className="grid grid-cols-[1fr_120px] gap-2 text-[11px] font-semibold text-zinc-500">
+                  <div>Name</div>
+                  <div className="text-right">QTY</div>
+                </div>
+
+                <div className="mt-3 grid gap-3">
+                  {!cart.length ? (
+                    <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+                      Sin items
+                    </div>
+                  ) : (
+                    cart.map((it) => (
+                      <div
+                        key={it.productId}
+                        className="grid grid-cols-[1fr_120px] items-center gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-zinc-900">
+                            {it.name}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {(it.lineTotal || 0).toLocaleString("es-AR", {
+                              style: "currency",
+                              currency: "ARS",
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => {
+                              const cur = Math.floor(num(it.qty));
+                              const next = Math.max(0, cur - 1);
+                              if (!next) removeCartItem(it.productId);
+                              else setCartQty(it.productId, String(next));
+                            }}
+                            disabled={busyHard}
+                            className="grid h-8 w-8 place-items-center rounded-full border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                          >
+                            –
+                          </button>
+
+                          <div className="w-7 text-center text-sm font-bold text-zinc-900">
+                            {Math.floor(num(it.qty))}
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              const cur = Math.floor(num(it.qty));
+                              setCartQty(it.productId, String(cur + 1));
+                            }}
+                            disabled={busyHard}
+                            className="grid h-8 w-8 place-items-center rounded-full border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Footer total + pay */}
+              <div className="border-t border-zinc-100 px-4 py-3">
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between text-sm text-zinc-600">
+                    <span>Sub Total</span>
+                    <span className="font-semibold text-zinc-900">
+                      {cartTotal.toLocaleString("es-AR", {
+                        style: "currency",
+                        currency: "ARS",
+                      })}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-zinc-900">
+                      Total
+                    </span>
+                    <span className="text-lg font-extrabold text-emerald-700">
+                      {cartTotal.toLocaleString("es-AR", {
+                        style: "currency",
+                        currency: "ARS",
+                      })}
+                    </span>
+                  </div>
+
+                  <button
+                    disabled={!canCheckout || busyHard}
+                    onClick={checkout}
+                    className={cn(
+                      "mt-1 h-12 rounded-xl text-sm font-extrabold",
+                      canCheckout
+                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                        : "bg-zinc-100 text-zinc-400"
+                    )}
+                  >
+                    Pay (
+                    {cartTotal.toLocaleString("es-AR", {
+                      style: "currency",
+                      currency: "ARS",
+                    })}
+                    )
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* (opcional) ventas del día abajo, si querés como pantalla secundaria */}
+          <div className="mt-4">
+            <SalesTable
+              sales={sales}
+              loadingSales={loadingSales}
+              loading={loading}
+              busy={busy}
+              dateKey={dateKey}
+              onVoidClick={(s) => {
+                const voided = s.status === "VOIDED";
+                if (voided) return;
+                setVoidSaleId(s.id);
+                setVoidDefaultDateKey(s.paidDateKey || dateKey);
+                setVoidOpen(true);
+              }}
             />
           </div>
 
-          <PaymentsCard
-            canUsePos={canUsePos}
-            busy={busyHard}
-            loading={loading}
-            creatingOrder={creatingOrder}
-            payments={payments}
-            onAddPaymentLine={addPaymentLine}
-            onRemovePaymentLine={removePaymentLine}
-            onUpdatePayment={updatePayment}
-            cartTotal={cartTotal}
-            paymentsTotal={paymentsTotal}
-            diff={diff}
-            fulfillment={fulfillment}
-            deliveryNeedsData={deliveryNeedsData}
-            concept={concept}
-            setConcept={setConcept}
-            categoryId={categoryId}
-            setCategoryId={setCategoryId}
-            note={note}
-            setNote={setNote}
-            activeCategories={activeCategories}
-            canCreateOrder={canCreateOrder}
-            canCheckout={canCheckout}
-            onCreateOrderOnly={createOrderOnly}
-            onCheckout={checkout}
-          />
-
-          <SalesTable
-            sales={sales}
-            loadingSales={loadingSales}
-            loading={loading}
-            busy={busy}
-            dateKey={dateKey}
-            onVoidClick={(s) => {
-              const voided = s.status === "VOIDED";
-              if (voided) return;
-              setVoidSaleId(s.id);
-              setVoidDefaultDateKey(s.paidDateKey || dateKey);
-              setVoidOpen(true);
-            }}
-          />
+          {/* Void modal */}
+          {voidSaleId && (
+            <VoidSaleModal
+              open={voidOpen}
+              onClose={() => setVoidOpen(false)}
+              busy={busy}
+              saleId={voidSaleId}
+              defaultDateKey={voidDefaultDateKey}
+              onConfirm={async ({ reason, dateKey }) => {
+                await confirmVoid({ saleId: voidSaleId, reason, dateKey });
+              }}
+            />
+          )}
         </div>
-
-        {/* ---------------- Drawers (mobile) ---------------- */}
-        <Drawer
-          open={drawerProducts}
-          onClose={() => setDrawerProducts(false)}
-          title="Productos"
-          side="bottom"
-        >
-          <ProductsCard
-            canUsePos={canUsePos}
-            busy={busyHard}
-            q={q}
-            setQ={setQ}
-            products={products}
-            loadingProducts={loadingProducts}
-            onSearchClick={() => searchProducts(q)}
-            onSearchKeyDown={onSearchKeyDown}
-            onAddToCart={(p) => {
-              addToCart(p);
-              // UX: keep drawer open for rapid add; you can close if you prefer
-            }}
-          />
-          <div className="mt-3 flex gap-2">
-            <button
-              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
-              disabled={busyHard}
-              onClick={() => {
-                setDrawerProducts(false);
-                setDrawerCart(true);
-              }}
-            >
-              Ir al carrito
-            </button>
-            <button
-              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
-              disabled={busyHard || !cart.length}
-              onClick={() => {
-                setDrawerProducts(false);
-                setDrawerPayments(true);
-              }}
-            >
-              Cobrar
-            </button>
-          </div>
-        </Drawer>
-
-        <Drawer
-          open={drawerCart}
-          onClose={() => setDrawerCart(false)}
-          title={`Carrito (${cart.length})`}
-          side="bottom"
-        >
-          <CartCard
-            canUsePos={canUsePos}
-            busy={busyHard}
-            cart={cart}
-            cartTotal={cartTotal}
-            onRemoveItem={removeCartItem}
-            onSetQty={setCartQty}
-            onSetNote={setCartNote}
-            onClear={clearCart}
-          />
-          <div className="mt-3 flex gap-2">
-            <button
-              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
-              disabled={busyHard}
-              onClick={() => {
-                setDrawerCart(false);
-                setDrawerProducts(true);
-              }}
-            >
-              Seguir agregando
-            </button>
-            <button
-              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
-              disabled={busyHard || !cart.length}
-              onClick={() => {
-                setDrawerCart(false);
-                setDrawerPayments(true);
-              }}
-            >
-              Ir a cobrar
-            </button>
-          </div>
-        </Drawer>
-
-        <Drawer
-          open={drawerOrder}
-          onClose={() => setDrawerOrder(false)}
-          title="Cliente / Entrega"
-          side="bottom"
-        >
-          <OrderCard
-            canUsePos={canUsePos}
-            busy={busyHard}
-            fulfillment={fulfillment}
-            setFulfillment={setFulfillment}
-            customerSnapshot={customerSnapshot}
-            setCustomerSnapshot={setCustomerSnapshot}
-            deliveryNeedsData={deliveryNeedsData}
-            customerId={customerId}
-            setCustomerId={setCustomerId}
-          />
-          <div className="mt-3 flex gap-2">
-            <button
-              className="flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
-              disabled={busyHard}
-              onClick={() => setDrawerOrder(false)}
-            >
-              Listo
-            </button>
-            <button
-              className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
-              disabled={busyHard}
-              onClick={() => {
-                setDrawerOrder(false);
-                setDrawerPayments(true);
-              }}
-            >
-              Ir a cobrar
-            </button>
-          </div>
-        </Drawer>
-
-        <Drawer
-          open={drawerPayments}
-          onClose={() => setDrawerPayments(false)}
-          title="Cobrar"
-          side="bottom"
-        >
-          {/* Quick actions on top for mobile */}
-          <div className="mb-3 grid grid-cols-2 gap-2">
-            <button
-              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
-              disabled={busyHard || !cart.length}
-              onClick={() => setPayExact(0)}
-            >
-              Pagar exacto
-            </button>
-            <button
-              className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
-              disabled={busyHard || !cart.length}
-              onClick={() => {
-                // UX: open cart quickly
-                setDrawerPayments(false);
-                setDrawerCart(true);
-              }}
-            >
-              Ver carrito
-            </button>
-          </div>
-
-          <PaymentsCard
-            canUsePos={canUsePos}
-            busy={busyHard}
-            loading={loading}
-            creatingOrder={creatingOrder}
-            payments={payments}
-            onAddPaymentLine={addPaymentLine}
-            onRemovePaymentLine={removePaymentLine}
-            onUpdatePayment={updatePayment}
-            cartTotal={cartTotal}
-            paymentsTotal={paymentsTotal}
-            diff={diff}
-            fulfillment={fulfillment}
-            deliveryNeedsData={deliveryNeedsData}
-            concept={concept}
-            setConcept={setConcept}
-            categoryId={categoryId}
-            setCategoryId={setCategoryId}
-            note={note}
-            setNote={setNote}
-            activeCategories={activeCategories}
-            canCreateOrder={canCreateOrder}
-            canCheckout={canCheckout}
-            onCreateOrderOnly={createOrderOnly}
-            onCheckout={checkout}
-          />
-        </Drawer>
-
-        {/* Void modal */}
-        {voidSaleId && (
-          <VoidSaleModal
-            open={voidOpen}
-            onClose={() => setVoidOpen(false)}
-            busy={busy}
-            saleId={voidSaleId}
-            defaultDateKey={voidDefaultDateKey}
-            onConfirm={async ({ reason, dateKey }) => {
-              await confirmVoid({ saleId: voidSaleId, reason, dateKey });
-            }}
-          />
-        )}
       </div>
     </AdminProtected>
   );

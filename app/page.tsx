@@ -23,9 +23,9 @@ export default function HomePage() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0f2f26]">
       {/* Fondo sutil */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-24 -top-24 h-[420px] w-[420px] rounded-full bg-[#1b5a46]/35 blur-3xl" />
-        <div className="absolute -bottom-24 -right-24 h-[420px] w-[420px] rounded-full bg-[#fbbf24]/10 blur-3xl" />
-        <div className="absolute inset-0 bg-gradient-to-b from-white/10 via-white/0 to-black/10" />
+        <div className="absolute -left-24 -top-24 h-105 w-105 rounded-full bg-[#1b5a46]/35 blur-3xl" />
+        <div className="absolute -bottom-24 -right-24 h-105 w-105 rounded-full bg-[#fbbf24]/10 blur-3xl" />
+        <div className="absolute inset-0 bg-linear-to-b from-white/10 via-white/0 to-black/10" />
       </div>
 
       {/* Contenido */}
