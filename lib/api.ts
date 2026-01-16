@@ -7,13 +7,20 @@ function safeJsonParse(text: string) {
     return null;
   }
 }
+
 export class ApiError extends Error {
   status: number;
   data: any;
   method: string;
   path: string;
 
-  constructor(args: { status: number; data: any; method: string; path: string; message: string }) {
+  constructor(args: {
+    status: number;
+    data: any;
+    method: string;
+    path: string;
+    message: string;
+  }) {
     super(args.message);
     this.name = "ApiError";
     this.status = args.status;
@@ -23,17 +30,45 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+function extractErrorMessage(data: any) {
+  if (!data) return null;
+  if (typeof data === "string") return data;
+
+  if (typeof data === "object") {
+    const m = (data as any).message ?? (data as any).error;
+    if (Array.isArray(m)) return m.filter(Boolean).join(" · ");
+    if (typeof m === "string") return m;
+  }
+
+  return null;
+}
+
+export async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
   const method = (options.method || "GET").toUpperCase();
   const hasBody = options.body != null;
 
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+
+  // No setear JSON content-type si es FormData o si ya viene seteado
+  const headersIn = (options.headers || {}) as Record<string, any>;
+  const hasContentTypeHeader =
+    Object.keys(headersIn).some((k) => k.toLowerCase() === "content-type");
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(!hasContentTypeHeader && hasBody && !isFormData
+      ? { "Content-Type": "application/json" }
+      : {}),
+    ...(headersIn as any),
+  };
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      Accept: "application/json",
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
+    headers,
     credentials: "include",
   });
 
@@ -41,10 +76,8 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const data = text.trim() ? safeJsonParse(text) ?? text : null;
 
   if (!res.ok) {
-    const msg =
-      (data && typeof data === "object" && (data.message || data.error)) ||
-      (typeof data === "string" ? data : null) ||
-      `HTTP ${res.status} ${res.statusText}`;
+    const extracted = extractErrorMessage(data);
+    const msg = extracted || `HTTP ${res.status} ${res.statusText}`;
 
     throw new ApiError({
       status: res.status,

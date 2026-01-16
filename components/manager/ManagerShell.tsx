@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -40,22 +40,41 @@ export default function ManagerShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const router = useRouter();
 
-  const roles = (user?.roles ?? []).map((r: string) => String(r).toUpperCase());
+  const roles = useMemo(
+    () => (user?.roles ?? []).map((r: string) => String(r).toUpperCase()),
+    [user?.roles]
+  );
 
-  const nav: NavItem[] = [
-    { href: "/manager", label: "Panel", icon: CalendarDays },
-    { href: "/manager/weekly", label: "Weekly", icon: ClipboardList },
-    { href: "/manager/attendance", label: "Asistencia", icon: ClipboardList },
-    { href: "/manager/stock", label: "Stock", icon: Package },
-    { href: "/manager/production", label: "Producción", icon: Factory },
-  ];
+  const nav: NavItem[] = useMemo(
+    () => [
+      { href: "/manager", label: "Panel", icon: CalendarDays },
+      { href: "/manager/weekly", label: "Weekly", icon: ClipboardList },
+      { href: "/manager/attendance", label: "Asistencia", icon: ClipboardList },
+      { href: "/manager/stock", label: "Stock", icon: Package },
+      { href: "/manager/production", label: "Producción", icon: Factory },
+    ],
+    []
+  );
+
+  function closeMobile() {
+    setMobileOpen(false);
+  }
+
+  function goBackSmart() {
+    // Si entró directo (sin history), que vuelva al panel manager
+    if (typeof window !== "undefined" && window.history.length <= 1) {
+      router.push("/manager");
+      return;
+    }
+    router.back();
+  }
 
   const Sidebar = (
-    <aside className="flex h-full w-[260px] flex-col bg-[#0f2f26] text-white">
+    <aside className="flex h-full w-65 flex-col bg-[#0f2f26] text-white">
       {/* Brand */}
       <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
         <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#144336] ring-1 ring-white/20">
@@ -79,8 +98,9 @@ export default function ManagerShell({
         <div className="text-xs text-white/70 truncate">
           {user?.email ?? "—"}
         </div>
+
         {roles.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
+          <div className="mt-2 flex flex-wrap gap-1">
             {roles.map((r) => (
               <span
                 key={r}
@@ -108,16 +128,18 @@ export default function ManagerShell({
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={() => setMobileOpen(false)}
+                onClick={closeMobile}
+                aria-current={active ? "page" : undefined}
                 className={cx(
-                  "flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition",
+                  "group flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition",
+                  "focus:outline-none focus:ring-2 focus:ring-white/30",
                   active
                     ? "bg-[#144336] text-white shadow-sm"
                     : "text-white/80 hover:bg-white/10 hover:text-white"
                 )}
               >
                 <span className="inline-flex items-center gap-2">
-                  <Icon className="h-4 w-4 opacity-90" />
+                  <Icon className="h-4 w-4 opacity-90 group-hover:opacity-100" />
                   {item.label}
                 </span>
                 {active && <span className="text-xs opacity-70">●</span>}
@@ -130,7 +152,11 @@ export default function ManagerShell({
       <div className="p-4 border-t border-white/10">
         <button
           onClick={logout}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition"
+          className={cx(
+            "flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2",
+            "text-sm font-semibold text-white transition hover:bg-white/20",
+            "focus:outline-none focus:ring-2 focus:ring-white/30"
+          )}
         >
           <LogOut className="h-4 w-4" />
           Cerrar sesión
@@ -141,7 +167,7 @@ export default function ManagerShell({
 
   return (
     <AdminProtected allow={["ADMIN", "MANAGER"]}>
-      <div className="flex h-screen bg-gradient-to-b from-zinc-50 to-zinc-100">
+      <div className="flex h-screen bg-linear-to-b from-zinc-50 to-zinc-100">
         {/* Sidebar desktop */}
         <div className="hidden md:block">{Sidebar}</div>
 
@@ -150,7 +176,11 @@ export default function ManagerShell({
           <div className="px-4 py-3 flex items-center justify-between">
             <button
               onClick={() => setMobileOpen(true)}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 hover:bg-zinc-50"
+              aria-label="Abrir menú"
+              className={cx(
+                "rounded-xl border border-zinc-200 bg-white px-3 py-2 transition",
+                "hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+              )}
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -166,65 +196,67 @@ export default function ManagerShell({
               </div>
               <div className="text-sm font-semibold text-zinc-900">Manager</div>
             </div>
+
+            <button
+              onClick={goBackSmart}
+              aria-label="Volver"
+              className={cx(
+                "rounded-xl border border-zinc-200 bg-white px-3 py-2 transition",
+                "hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+              )}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
           </div>
         </div>
 
         {/* Mobile drawer */}
         {mobileOpen && (
           <div className="md:hidden fixed inset-0 z-40">
+            {/* overlay */}
             <button
               className="absolute inset-0 bg-black/40"
-              onClick={() => setMobileOpen(false)}
+              onClick={closeMobile}
+              aria-label="Cerrar menú"
             />
-            <div className="absolute left-0 top-0 h-full w-[280px] bg-[#0f2f26]">
-              <div className="flex justify-end p-3">
+
+            {/* IMPORTANT: no lo envuelvas con otro width */}
+            <div className="absolute left-0 top-0 h-full">
+              <div className="relative h-full">
                 <button
-                  onClick={() => setMobileOpen(false)}
-                  className="rounded-xl bg-white/10 p-2"
+                  onClick={closeMobile}
+                  aria-label="Cerrar"
+                  className="absolute right-3 top-3 z-10 rounded-xl bg-white/10 p-2 focus:outline-none focus:ring-2 focus:ring-white/30"
                 >
                   <X className="h-5 w-5 text-white" />
                 </button>
+
+                {Sidebar}
               </div>
-              {Sidebar}
             </div>
           </div>
         )}
 
         {/* Main */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
-          {/* Top bar (mobile + back) */}
-          <div className="sticky top-0 z-30 flex items-center gap-2 border-b bg-white/80 backdrop-blur px-4 py-3 md:hidden">
-            <button
-              onClick={() => setMobileOpen(true)}
-              className="rounded-lg border p-2 text-zinc-700"
-            >
-              <Menu className="h-4 w-4" />
-            </button>
-
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm text-zinc-700"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Volver
-            </button>
-          </div>
-
-          {/* Content */}
-          <main className="mx-auto max-w-7xl px-6 py-6">
-            {/* Back button desktop */}
-            <div className="mb-4 hidden md:flex">
+        <div className="flex-1 min-w-0 overflow-y-auto pt-15 md:pt-0">
+          {/* Back button desktop */}
+          <div className="sticky top-0 z-20 hidden md:block border-b bg-white/80 backdrop-blur">
+            <div className="mx-auto max-w-7xl px-6 py-3">
               <button
-                onClick={() => router.back()}
-                className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                onClick={goBackSmart}
+                className={cx(
+                  "inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700",
+                  "transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                )}
               >
                 <ArrowLeft className="h-4 w-4" />
                 Volver
               </button>
             </div>
+          </div>
 
-            {children}
-          </main>
+          {/* Content */}
+          <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
         </div>
       </div>
     </AdminProtected>
